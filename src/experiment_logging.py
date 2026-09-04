@@ -1,0 +1,212 @@
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+
+def print_section(title: str) -> None:
+    '''Print a formatted section title.'''
+
+    print('\n' + '=' * 70)
+    print(title)
+    print('=' * 70)
+
+
+def print_experiment_info(config) -> None:
+    '''Print experiment settings and target scale.'''
+
+    print_section(f'Experiment: {config.general.experiment_name}')
+    print(f'Started: {datetime.now():%Y-%m-%d %H:%M:%S}')
+    print(f'Random seed: {config.general.seed}')
+    print(f'Fold seed: {config.training.fold_seed}')
+    print(f'CV shuffle: {config.dataloader_params.shuffle}')
+    print('Target transformation: np.log(SalePrice)')
+    print('Primary metric: RMSE(log), lower is better')
+
+
+def print_data_info(train_df, train_cv_df, holdout_df, test_df, config) -> None:
+    '''Print dataset sizes and feature exclusions.'''
+
+    print(f'Train: {train_df.shape}')
+    print(f'Train/CV: {train_cv_df.shape}')
+    print(f'Holdout: {holdout_df.shape}')
+    print(f'Kaggle test: {test_df.shape}')
+    print(f'Holdout fraction: {config.split.test_size}')
+    print(f'Excluded columns: {list(config.preprocessing.drop_columns)}')
+
+
+def print_model_info(config) -> None:
+    '''Print the active model and its configured parameters.'''
+
+    print_section('Model Information')
+    print(f'Active model: {config.model.active}')
+    for name, value in config.model.models[config.model.active].items():
+        print(f'{name}: {value}')
+
+
+def print_cv_start(config) -> None:
+    '''Print the cross-validation heading and fold count.'''
+
+    print_section('Cross Validation')
+    print(f'Number of folds: {config.split.n_splits}')
+
+
+def print_cv_summary(scores, number_of_models) -> None:
+    '''Print mean CV error, its standard deviation and ensemble size.'''
+
+    print(f'\nMean CV RMSE(log): {np.mean(scores):.5f}')
+    print(f'CV STD: {np.std(scores):.5f}')
+    print(f'Number of prediction models: {number_of_models}')
+
+
+def print_feature_importance(fold_models, top_n=20) -> pd.DataFrame:
+    '''Print top encoded features by mean impurity importance across folds.'''
+
+    if not fold_models:
+        raise ValueError('No fitted fold models provided.')
+
+    if top_n < 1:
+        raise ValueError('top_n must be a positive integer.')
+
+    fold_importances = []
+
+    for pipe in fold_models:
+        model = pipe.named_steps['model']
+        feature_names = pipe.named_steps['preprocessor'].get_feature_names_out()
+
+        fold_importances.append(pd.Series(model.feature_importances_, index=feature_names))
+
+    # Сопоставляем признаки по именам: набор one-hot колонок между фолдами может различаться.
+    importance_by_fold = pd.concat(fold_importances, axis=1).fillna(0)
+
+    importance_df = importance_by_fold.mean(axis=1).rename('importance').rename_axis('feature').reset_index()
+    importance_df = importance_df.sort_values('importance', ascending=False, kind='stable').reset_index(drop=True)
+
+    print_section('Feature Importance')
+    print(f'Mean impurity-based importance across {len(fold_models)} folds (after encoding).')
+    print(f'Top {min(top_n, len(importance_df))} features:')
+    print(importance_df.head(top_n).to_string(index=False, float_format=lambda value: f'{value:.4f}'))
+
+    return importance_df
+
+
+def print_submission_info(number_of_models) -> None:
+    '''Print the ensemble prediction method and training scope.'''
+
+    print_section('Kaggle Submission')
+    print(f'Number of prediction models: {number_of_models}')
+    print('Prediction method: average log predictions, then apply np.exp')
+    print('Training data: Train/CV folds; holdout excluded')
+
+
+def print_submission_summary(submission_df) -> None:
+    '''Print the submission size and mean predicted price.'''
+
+    print(f'Submission rows: {len(submission_df)}')
+    print(f'Mean predicted price: ${submission_df["SalePrice"].mean():,.2f}')
+
+
+def print_run_summary(config, elapsed_seconds) -> None:
+    '''Print the completed run duration and log path.'''
+
+    print_section('Run Completed')
+    print(f'Total runtime: {elapsed_seconds:.1f} seconds')
+    log_path = Path(config.paths.path_to_logs) / f'{config.general.experiment_name}.txt'
+    print(f'Log saved: {log_path}')
+
+
+def save_oof_predictions(train_cv_df, oof_predictions, fold_ids, config):
+    '''Save out-of-fold predictions and houses sorted by prediction error.'''
+
+    oof_df = train_cv_df.copy()
+
+    oof_df['fold'] = fold_ids + 1
+    oof_df['actual_log'] = np.log(oof_df['SalePrice'])
+    oof_df['prediction_log'] = oof_predictions
+    oof_df['prediction_price'] = np.exp(oof_predictions)
+
+    oof_df['error_log'] = oof_df['prediction_log'] - oof_df['actual_log']
+    oof_df['abs_error_log'] = oof_df['error_log'].abs()
+    oof_df['error_price'] = oof_df['prediction_price'] - oof_df['SalePrice']
+
+    output_dir = Path(config.paths.path_to_oof)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    experiment_name = config.general.experiment_name
+    oof_path = output_dir / f'{experiment_name}.csv'
+    errors_path = output_dir / f'{experiment_name}_errors.csv'
+
+    oof_df.to_csv(oof_path, index=False, sep=';', encoding='utf-8-sig')
+
+    errors_df = oof_df.sort_values('abs_error_log', ascending=False)
+    errors_df.to_csv(errors_path, index=False, sep=';', encoding='utf-8-sig')
+
+    print(f'OOF predictions saved: {oof_path}')
+    print(f'OOF errors saved: {errors_path}')
+
+    return oof_df
+
+
+def print_regression_metrics(name, metrics):
+    '''Print regression metrics with explicit units.'''
+
+    print(f'\n{name}:')
+    print(f'RMSE(log): {metrics["rmse_log"]:.5f}')
+    print(f'MAE($):    {metrics["mae_dollars"]:,.2f}')
+    print(f'MSE($²):   {metrics["mse_dollars_squared"]:,.2f}')
+    print(f'RMSE($):   {metrics["rmse_dollars"]:,.2f}')
+    print(f'R²:        {metrics["r2"]:.5f}')
+    print(f'MAPE:      {metrics["mape_pct"]:.2f}%')
+    print(f'SMAPE:     {metrics["smape_pct"]:.2f}%')
+    print(f'WAPE:      {metrics["wape_pct"]:.2f}%')
+
+
+def save_holdout_predictions(holdout_df, predictions_log, config):
+    '''Save holdout prices, predictions and prediction errors.'''
+
+    predictions_log = np.asarray(predictions_log)
+
+    predictions_df = holdout_df[['Id', 'SalePrice']].copy()
+    predictions_df['actual_log'] = np.log(predictions_df['SalePrice'])
+    predictions_df['prediction_log'] = predictions_log
+    predictions_df['prediction_price'] = np.exp(predictions_log)
+
+    predictions_df['error_log'] = predictions_df['prediction_log'] - predictions_df['actual_log']
+    predictions_df['abs_error_log'] = predictions_df['error_log'].abs()
+    predictions_df['error_price'] = predictions_df['prediction_price'] - predictions_df['SalePrice']
+
+    output_dir = Path(config.paths.path_to_holdout)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = output_dir / f'{config.general.experiment_name}.csv'
+    predictions_df.to_csv(output_path, index=False, sep=';', encoding='utf-8-sig')
+
+    print(f'Holdout predictions saved: {output_path}')
+
+    return predictions_df
+
+
+def save_submission(test_df, predictions_log, config):
+    '''Convert log predictions to prices and save a Kaggle submission.'''
+
+    predictions_price = np.exp(np.asarray(predictions_log))
+
+    if predictions_price.shape != (len(test_df),):
+        raise ValueError('Expected one prediction per test row.')
+
+    if not np.isfinite(predictions_price).all() or (predictions_price <= 0).any():
+        raise ValueError('Predicted prices must be finite and strictly positive.')
+
+    submission_df = test_df[['Id']].copy()
+    submission_df['SalePrice'] = predictions_price
+
+    output_dir = Path(config.paths.path_to_submission)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = output_dir / f'{config.general.experiment_name}.csv'
+    submission_df.to_csv(output_path, index=False)
+
+    print(f'Submission saved: {output_path}')
+
+    return submission_df

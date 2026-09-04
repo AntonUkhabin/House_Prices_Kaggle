@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+
+# Secrets
+.env
+
+# Generated snapshots
+outputs/snapshots/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Optional
+data/
+outputs/
