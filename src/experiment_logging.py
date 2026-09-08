@@ -60,6 +60,80 @@ def print_cv_summary(scores, number_of_models) -> None:
     print(f'Number of prediction models: {number_of_models}')
 
 
+def print_model_diagnostics(fold_models, config, top_n=20):
+    '''Print diagnostics specific to the active model.'''
+
+    active_model = config.model.active
+
+    if active_model == 'linear_regression':
+        return print_linear_coefficients(fold_models, top_n=top_n)
+
+    if active_model == 'random_forest':
+        return print_feature_importance(fold_models, top_n=top_n)
+
+    raise ValueError(f'Unknown model for diagnostics: {active_model}')
+
+
+def print_linear_coefficients(fold_models, top_n=20) -> pd.DataFrame:
+    '''Print the largest linear coefficients averaged across folds.'''
+
+    if not fold_models:
+        raise ValueError('No fitted fold models provided.')
+
+    if top_n < 1:
+        raise ValueError('top_n must be a positive integer.')
+
+    fold_coefficients = []
+    intercepts = []
+    matrix_ranks = []
+    feature_counts = []
+
+    for fold, pipe in enumerate(fold_models, start=1):
+        model = pipe.named_steps['model']
+        preprocessor = pipe.named_steps['preprocessor']
+
+        feature_names = preprocessor.get_feature_names_out()
+        coefficients = np.asarray(model.coef_).reshape(-1)
+
+        if len(feature_names) != len(coefficients):
+            raise ValueError('Feature names and model coefficients have different lengths.')
+
+        fold_coefficients.append(
+            pd.Series(coefficients, index=feature_names, name=f'fold_{fold}')
+        )
+
+        intercepts.append(float(model.intercept_))
+        matrix_ranks.append(int(model.rank_))
+        feature_counts.append(len(feature_names))
+
+    # Наборы One-Hot колонок могут различаться между folds из-за редких категорий.
+    coefficients_by_fold = pd.concat(fold_coefficients, axis=1)
+
+    coefficient_df = pd.DataFrame({
+        'mean_coefficient': coefficients_by_fold.mean(axis=1),
+        'mean_abs_coefficient': coefficients_by_fold.abs().mean(axis=1),
+        'std_coefficient': coefficients_by_fold.std(axis=1, ddof=0),
+        'fold_count': coefficients_by_fold.notna().sum(axis=1),
+    })
+
+    coefficient_df = (
+        coefficient_df
+        .sort_values('mean_abs_coefficient', ascending=False, kind='stable')
+        .rename_axis('feature')
+        .reset_index()
+    )
+
+    print_section('Linear Regression Diagnostics')
+    print(f'Mean intercept: {np.mean(intercepts):.5f}')
+    print(f'Intercept STD: {np.std(intercepts):.5f}')
+    print(f'Transformed features per fold: {min(feature_counts)}–{max(feature_counts)}')
+    print(f'Design matrix rank per fold: {min(matrix_ranks)}–{max(matrix_ranks)}')
+    print(f'Top {min(top_n, len(coefficient_df))} coefficients by mean absolute value:')
+    print(coefficient_df.head(top_n).to_string(index=False, float_format=lambda value: f'{value:.5f}'))
+
+    return coefficient_df
+
+
 def print_feature_importance(fold_models, top_n=20) -> pd.DataFrame:
     '''Print top encoded features by mean impurity importance across folds.'''
 

@@ -5,6 +5,7 @@ from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error,
 from sklearn.model_selection import KFold
 from sklearn.pipeline           import Pipeline
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
 
 from src.preprocessing          import build_preprocessor
 
@@ -15,6 +16,9 @@ def build_model(config, categorical_features=None):
     active_model = config.model.active
     model_params = dict(config.model.models[active_model])
 
+    if active_model == 'linear_regression':
+        return LinearRegression(**model_params)    
+    
     if active_model == 'random_forest':
         return RandomForestRegressor(**model_params)
 

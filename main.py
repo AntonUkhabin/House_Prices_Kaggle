@@ -8,9 +8,14 @@ from src.data import load_data, split_train_holdout
 from src.train_functions import calculate_regression_metrics, cross_validate_standard, predict_with_pipeline_ensemble
 from src.utils import set_seed, setup_run_logging
 
+import warnings
+# Не выводим ожидаемые предупреждения о новых категориях:
+# OneHotEncoder безопасно кодирует их нулями благодаря handle_unknown='ignore'.
+warnings.filterwarnings('ignore', message='Found unknown categories.*encoded as all zeros', category=UserWarning, module='sklearn.preprocessing._encoders')
+
 
 def main() -> int:
-    '''Run the RF baseline, save predictions and capture terminal output.'''
+    '''Run the active regression model, save predictions and capture terminal output.'''
 
     tee_logger = setup_run_logging(config)
     started = perf_counter()
@@ -36,8 +41,8 @@ def main() -> int:
 
         log.print_cv_summary(scores, len(fold_models))
 
-        # Усредняем важности всех фолдов, сопоставляя признаки по именам.
-        log.print_feature_importance(fold_models, top_n=20)
+        # Выводим диагностику, соответствующую активной модели.
+        log.print_model_diagnostics(fold_models, config, top_n=20)
 
         # Метрики получают реальные цены в долларах и прогнозы в логарифмах.
         log.print_section('OOF Evaluation')
