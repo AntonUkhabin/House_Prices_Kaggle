@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '3_ridge_baseline',
+        'experiment_name': '4_ridge_without_eda_outliers',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -23,6 +23,9 @@ config = {
     'split': {
         'n_splits': 5,
         'test_size': 0.2,
+
+        # Включает удаление двух аномальных продаж, найденных во время EDA.
+        'remove_eda_outliers': True,
     }, 
     'preprocessing': {
         'drop_columns': [],
