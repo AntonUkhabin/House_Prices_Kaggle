@@ -92,7 +92,7 @@ def build_preprocessor(config):
 
     active_model = config.model.active
 
-    if active_model == 'linear_regression':
+    if active_model in ('linear_regression', 'ridge'):
         return build_linear_preprocessor(config)
 
     if active_model == 'random_forest':

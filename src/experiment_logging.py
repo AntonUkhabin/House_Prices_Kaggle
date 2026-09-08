@@ -65,7 +65,7 @@ def print_model_diagnostics(fold_models, config, top_n=20):
 
     active_model = config.model.active
 
-    if active_model == 'linear_regression':
+    if active_model in ('linear_regression', 'ridge'):
         return print_linear_coefficients(fold_models, top_n=top_n)
 
     if active_model == 'random_forest':
@@ -103,7 +103,10 @@ def print_linear_coefficients(fold_models, top_n=20) -> pd.DataFrame:
         )
 
         intercepts.append(float(model.intercept_))
-        matrix_ranks.append(int(model.rank_))
+        # LinearRegression сохраняет ранг матрицы, а Ridge такого атрибута не предоставляет.
+        if hasattr(model, 'rank_'):
+            matrix_ranks.append(int(model.rank_))
+
         feature_counts.append(len(feature_names))
 
     # Наборы One-Hot колонок могут различаться между folds из-за редких категорий.
@@ -127,7 +130,8 @@ def print_linear_coefficients(fold_models, top_n=20) -> pd.DataFrame:
     print(f'Mean intercept: {np.mean(intercepts):.5f}')
     print(f'Intercept STD: {np.std(intercepts):.5f}')
     print(f'Transformed features per fold: {min(feature_counts)}–{max(feature_counts)}')
-    print(f'Design matrix rank per fold: {min(matrix_ranks)}–{max(matrix_ranks)}')
+    if matrix_ranks:
+        print(f'Design matrix rank per fold: {min(matrix_ranks)}–{max(matrix_ranks)}')
     print(f'Top {min(top_n, len(coefficient_df))} coefficients by mean absolute value:')
     print(coefficient_df.head(top_n).to_string(index=False, float_format=lambda value: f'{value:.5f}'))
 

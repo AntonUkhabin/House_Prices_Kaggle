@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '2_linear_regression_baseline',
+        'experiment_name': '3_ridge_baseline',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -28,11 +28,16 @@ config = {
         'drop_columns': [],
     },
     'model': {
-        'active': 'linear_regression',
+        'active': 'ridge',
 
         'models': {
 
             'linear_regression': {
+                'fit_intercept': True,
+            },
+
+            'ridge': {
+                'alpha': 1.0,
                 'fit_intercept': True,
             },
 
