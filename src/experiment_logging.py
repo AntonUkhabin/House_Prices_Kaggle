@@ -65,7 +65,7 @@ def print_model_diagnostics(fold_models, config, top_n=20):
 
     active_model = config.model.active
 
-    if active_model in ('linear_regression', 'ridge'):
+    if active_model in ('linear_regression', 'ridge', 'lasso', 'elastic_net'):
         return print_linear_coefficients(fold_models, top_n=top_n)
 
     if active_model == 'random_forest':
@@ -87,6 +87,7 @@ def print_linear_coefficients(fold_models, top_n=20) -> pd.DataFrame:
     intercepts = []
     matrix_ranks = []
     feature_counts = []
+    zero_coefficient_counts = []
 
     for fold, pipe in enumerate(fold_models, start=1):
         model = pipe.named_steps['model']
@@ -108,6 +109,7 @@ def print_linear_coefficients(fold_models, top_n=20) -> pd.DataFrame:
             matrix_ranks.append(int(model.rank_))
 
         feature_counts.append(len(feature_names))
+        zero_coefficient_counts.append(int(np.count_nonzero(coefficients == 0)))
 
     # Наборы One-Hot колонок могут различаться между folds из-за редких категорий.
     coefficients_by_fold = pd.concat(fold_coefficients, axis=1)
@@ -126,10 +128,14 @@ def print_linear_coefficients(fold_models, top_n=20) -> pd.DataFrame:
         .reset_index()
     )
 
-    print_section('Linear Regression Diagnostics')
+    print_section('Linear Model Diagnostics')
     print(f'Mean intercept: {np.mean(intercepts):.5f}')
     print(f'Intercept STD: {np.std(intercepts):.5f}')
     print(f'Transformed features per fold: {min(feature_counts)}–{max(feature_counts)}')
+    if any(zero_coefficient_counts):
+        nonzero_coefficient_counts = np.asarray(feature_counts) - np.asarray(zero_coefficient_counts)
+        print(f'Zero coefficients per fold: {min(zero_coefficient_counts)}–{max(zero_coefficient_counts)}')
+        print(f'Non-zero coefficients per fold: {min(nonzero_coefficient_counts)}–{max(nonzero_coefficient_counts)}')
     if matrix_ranks:
         print(f'Design matrix rank per fold: {min(matrix_ranks)}–{max(matrix_ranks)}')
     print(f'Top {min(top_n, len(coefficient_df))} coefficients by mean absolute value:')
@@ -195,7 +201,7 @@ def print_run_summary(config, elapsed_seconds) -> None:
 
 
 def save_oof_predictions(train_cv_df, oof_predictions, fold_ids, config):
-    '''Save out-of-fold predictions and houses sorted by prediction error.'''
+    '''Save out-of-fold predictions sorted by prediction error.'''
 
     oof_df = train_cv_df.copy()
 
@@ -212,15 +218,12 @@ def save_oof_predictions(train_cv_df, oof_predictions, fold_ids, config):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     experiment_name = config.general.experiment_name
-    oof_path = output_dir / f'{experiment_name}.csv'
     errors_path = output_dir / f'{experiment_name}_errors.csv'
 
-    oof_df.to_csv(oof_path, index=False, sep=';', encoding='utf-8-sig')
-
-    errors_df = oof_df.sort_values('abs_error_log', ascending=False)
+    # Сохраняем все OOF-наблюдения, начиная с объектов с наибольшей ошибкой.
+    errors_df = oof_df.sort_values('abs_error_log', ascending=False, kind='stable').reset_index(drop=True)
     errors_df.to_csv(errors_path, index=False, sep=';', encoding='utf-8-sig')
 
-    print(f'OOF predictions saved: {oof_path}')
     print(f'OOF errors saved: {errors_path}')
 
     return oof_df

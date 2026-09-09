@@ -5,7 +5,7 @@ from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error,
 from sklearn.model_selection import KFold
 from sklearn.pipeline           import Pipeline
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 
 from src.preprocessing          import build_preprocessor
 
@@ -21,6 +21,12 @@ def build_model(config, categorical_features=None):
 
     if active_model == 'ridge':
         return Ridge(**model_params)
+
+    if active_model == 'lasso':
+        return Lasso(**model_params)
+
+    if active_model == 'elastic_net':
+        return ElasticNet(**model_params)
     
     if active_model == 'random_forest':
         return RandomForestRegressor(**model_params)

@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '4_ridge_without_eda_outliers',
+        'experiment_name': '10_elastic_net_alpha_0004_l1_09',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -31,7 +31,7 @@ config = {
         'drop_columns': [],
     },
     'model': {
-        'active': 'ridge',
+        'active': 'elastic_net',
 
         'models': {
 
@@ -40,8 +40,25 @@ config = {
             },
 
             'ridge': {
-                'alpha': 1.0,
+                'alpha': 15.0,
                 'fit_intercept': True,
+            },
+
+            'lasso': {
+                'alpha': 0.00025,
+                'fit_intercept': True,
+                'max_iter': 50_000,
+                'tol': 1e-4,
+                'selection': 'cyclic',
+            },
+
+            'elastic_net': {
+                'alpha': 0.0004,
+                'l1_ratio': 0.9,
+                'fit_intercept': True,
+                'max_iter': 50_000,
+                'tol': 1e-4,
+                'selection': 'cyclic',
             },
 
             'random_forest': {
