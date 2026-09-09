@@ -8,6 +8,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 
 from src.preprocessing          import build_preprocessor
+from src.feature_engineering import SelectedLog1pTransformer
 
 
 def build_model(config, categorical_features=None):
@@ -40,6 +41,8 @@ def build_feature_pipeline(config) -> Pipeline:
     preprocessor = build_preprocessor(config)
 
     feature_pipeline = Pipeline([
+        # Преобразование входит в Pipeline и одинаково применяется к train, validation, holdout и test.
+        ('selected_log1p', SelectedLog1pTransformer()),
         ('preprocessor', preprocessor),
     ])
 

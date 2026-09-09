@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '10_elastic_net_alpha_0004_l1_09',
+        'experiment_name': '11_elastic_net_selected_log1p',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
