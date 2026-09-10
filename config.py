@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '11_elastic_net_selected_log1p',
+        'experiment_name': '29_elastic_net_return_garage_condition',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -28,7 +28,9 @@ config = {
         'remove_eda_outliers': True,
     }, 
     'preprocessing': {
-        'drop_columns': [],
+        'drop_columns': ['Utilities', 'Condition2', 'BsmtUnfSF', 'BldgType', 'HouseStyle', 'Exterior2nd', 'GarageQual',
+            'Street', 'Alley', 'RoofMatl', 'Heating', 'LowQualFinSF', 'PoolQC', 'BedroomAbvGr', 'TotRmsAbvGrd', 'GarageYrBlt', 'MasVnrArea',
+            'Fireplaces'],
     },
     'model': {
         'active': 'elastic_net',

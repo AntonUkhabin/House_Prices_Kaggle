@@ -261,6 +261,8 @@ def save_holdout_predictions(holdout_df, predictions_log, config):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_path = output_dir / f'{config.general.experiment_name}.csv'
+
+    predictions_df = predictions_df.sort_values('abs_error_log', ascending=False, kind='stable').reset_index(drop=True)
     predictions_df.to_csv(output_path, index=False, sep=';', encoding='utf-8-sig')
 
     print(f'Holdout predictions saved: {output_path}')
