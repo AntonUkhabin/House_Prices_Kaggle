@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '29_elastic_net_return_garage_condition',
+        'experiment_name': '35_lasso_tuned_alpha_000225',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -33,7 +33,7 @@ config = {
             'Fireplaces'],
     },
     'model': {
-        'active': 'elastic_net',
+        'active': 'lasso',
 
         'models': {
 
@@ -47,7 +47,7 @@ config = {
             },
 
             'lasso': {
-                'alpha': 0.00025,
+                'alpha': 0.000225,
                 'fit_intercept': True,
                 'max_iter': 50_000,
                 'tol': 1e-4,
