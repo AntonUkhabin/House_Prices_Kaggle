@@ -5,7 +5,7 @@ from time import perf_counter
 from config import config
 from src import experiment_logging as log
 from src.data import load_data, split_train_holdout
-from src.train_functions import calculate_regression_metrics, cross_validate_standard, predict_with_pipeline_ensemble
+from src.train_functions import calculate_regression_metrics, cross_validate_model_with_early_stopping, cross_validate_standard, predict_with_pipeline_ensemble
 from src.utils import set_seed, setup_run_logging
 
 import warnings
@@ -37,7 +37,10 @@ def main() -> int:
         # Каждый фолд обучает свой пайплайн; модели сохраняются для ансамбля.
         log.print_cv_start(config)
 
-        scores, fold_models, oof_predictions, fold_ids = cross_validate_standard(train_cv_df, 'SalePrice', config)
+        if config.model.active == 'catboost':
+            scores, fold_models, oof_predictions, fold_ids = cross_validate_model_with_early_stopping(train_cv_df, 'SalePrice', config)
+        else:
+            scores, fold_models, oof_predictions, fold_ids = cross_validate_standard(train_cv_df, 'SalePrice', config)
 
         log.print_cv_summary(scores, len(fold_models))
 
@@ -52,15 +55,18 @@ def main() -> int:
         log.print_regression_metrics('OOF', oof_metrics)
         log.save_oof_predictions(train_cv_df, oof_predictions, fold_ids, config)
 
-        # Оцениваем ансамбль на holdout без дополнительного обучения.
-        log.print_section('Holdout Evaluation')
+        print(f'\nHoldout evaluation enabled: {config.evaluation.evaluate_holdout}')
 
-        features_holdout = holdout_df.drop(columns=['SalePrice'])
-        holdout_predictions_log = predict_with_pipeline_ensemble(features_holdout, fold_models)
-        holdout_metrics = calculate_regression_metrics(holdout_df['SalePrice'], holdout_predictions_log)
+        if config.evaluation.evaluate_holdout:
+            # Готовый ансамбль оценивается на holdout без дополнительного обучения.
+            log.print_section('Holdout Evaluation')
 
-        log.print_regression_metrics('Holdout', holdout_metrics)
-        log.save_holdout_predictions(holdout_df, holdout_predictions_log, config)
+            features_holdout = holdout_df.drop(columns=['SalePrice'])
+            holdout_predictions_log = predict_with_pipeline_ensemble(features_holdout, fold_models)
+            holdout_metrics = calculate_regression_metrics(holdout_df['SalePrice'], holdout_predictions_log)
+
+            log.print_regression_metrics('Holdout', holdout_metrics)
+            log.save_holdout_predictions(holdout_df, holdout_predictions_log, config)
 
         # Тот же ансамбль предсказывает test.csv; save_submission возвращает цены в доллары.
         log.print_submission_info(len(fold_models))

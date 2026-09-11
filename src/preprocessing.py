@@ -5,6 +5,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.utils.validation import check_is_fitted
 
 
 class StructuralMissingTransformer(BaseEstimator, TransformerMixin):
@@ -87,6 +88,43 @@ class ColumnSelector:
         raise ValueError(f'Unknown feature kind: {self.kind}')
 
 
+class CatBoostPreprocessor(BaseEstimator, TransformerMixin):
+    '''Prepare a DataFrame for native CatBoost processing.'''
+
+    def __init__(self, drop_columns=()):
+        self.drop_columns = drop_columns
+
+    def fit(self, features, labels=None):
+        '''Store selected columns and categorical feature names.'''
+
+        self.feature_names_in_ = np.asarray(features.columns, dtype=object)
+        selected_features = features.drop(columns=['Id', *self.drop_columns], errors='ignore')
+
+        # Фиксируем состав, порядок и типы признаков по train, чтобы validation и inference использовали ту же схему.
+        self.selected_features_ = selected_features.columns.tolist()
+        self.categorical_features_ = selected_features.select_dtypes(exclude=np.number).columns.tolist()
+
+        return self
+
+    def transform(self, features):
+        '''Select fitted columns and normalize categorical values.'''
+
+        check_is_fitted(self, ['selected_features_', 'categorical_features_'])
+        transformed_features = features.loc[:, self.selected_features_].copy()
+
+        # Числовые NaN оставляем CatBoost; категориальные пропуски заменяем до преобразования в строки.
+        for feature in self.categorical_features_:
+            transformed_features[feature] = transformed_features[feature].astype('object').fillna('Unknown').astype(str)
+
+        return transformed_features
+
+    def get_feature_names_out(self, input_features=None):
+        '''Return selected feature names in transformation order.'''
+
+        check_is_fitted(self, 'selected_features_')
+        return np.asarray(self.selected_features_, dtype=object)
+
+
 def build_preprocessor(config):
     '''Build preprocessing for the active model.'''
 
@@ -97,6 +135,9 @@ def build_preprocessor(config):
 
     if active_model == 'random_forest':
         return build_tree_preprocessor(config)
+
+    if active_model == 'catboost':
+        return build_catboost_preprocessor(config)
 
     raise ValueError(f'Unknown preprocessor for model: {active_model}')
 
@@ -149,3 +190,11 @@ def build_tree_preprocessor(config) -> ColumnTransformer:
     ], remainder='drop')
 
 
+def build_catboost_preprocessor(config) -> Pipeline:
+    '''Build preprocessing with structural missing categories for CatBoost.'''
+
+    return Pipeline([
+        # Structural missing обрабатываем до удаления колонок: некоторые из них нужны для определения отсутствия объекта.
+        ('structural_missing', StructuralMissingTransformer()),
+        ('catboost_features', CatBoostPreprocessor(drop_columns=list(config.preprocessing.drop_columns))),
+    ])

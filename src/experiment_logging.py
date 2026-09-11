@@ -71,6 +71,9 @@ def print_model_diagnostics(fold_models, config, top_n=20):
     if active_model == 'random_forest':
         return print_feature_importance(fold_models, top_n=top_n)
 
+    if active_model == 'catboost':
+        return print_catboost_diagnostics(fold_models, top_n=top_n)
+
     raise ValueError(f'Unknown model for diagnostics: {active_model}')
 
 
@@ -169,6 +172,49 @@ def print_feature_importance(fold_models, top_n=20) -> pd.DataFrame:
 
     print_section('Feature Importance')
     print(f'Mean impurity-based importance across {len(fold_models)} folds (after encoding).')
+    print(f'Top {min(top_n, len(importance_df))} features:')
+    print(importance_df.head(top_n).to_string(index=False, float_format=lambda value: f'{value:.4f}'))
+
+    return importance_df
+
+
+def print_catboost_diagnostics(fold_models, top_n=20) -> pd.DataFrame:
+    '''Print CatBoost training details and mean feature importance across folds.'''
+
+    if not fold_models:
+        raise ValueError('No fitted fold models provided.')
+
+    if top_n < 1:
+        raise ValueError('top_n must be a positive integer.')
+
+    fold_importances = []
+    best_iterations = []
+    tree_counts = []
+    feature_counts = []
+    categorical_counts = []
+
+    for fold, pipe in enumerate(fold_models, start=1):
+        model = pipe.named_steps['model']
+        preprocessor = pipe.named_steps['preprocessor']
+        feature_names = preprocessor.get_feature_names_out()
+
+        fold_importances.append(pd.Series(model.feature_importances_, index=feature_names, name=f'fold_{fold}'))
+        best_iterations.append(model.get_best_iteration() + 1)
+        tree_counts.append(model.tree_count_)
+        feature_counts.append(len(feature_names))
+        categorical_counts.append(len(preprocessor.named_steps['catboost_features'].categorical_features_))
+
+    # Сопоставляем importance по названиям исходных признаков, затем усредняем по folds.
+    importance_by_fold = pd.concat(fold_importances, axis=1)
+    importance_df = importance_by_fold.mean(axis=1).rename('importance').rename_axis('feature').reset_index()
+    importance_df = importance_df.sort_values('importance', ascending=False, kind='stable').reset_index(drop=True)
+
+    print_section('CatBoost Diagnostics')
+    print(f'Features per fold: {min(feature_counts)}–{max(feature_counts)}')
+    print(f'Categorical features per fold: {min(categorical_counts)}–{max(categorical_counts)}')
+    print(f'Best iterations: {best_iterations}')
+    print(f'Trees retained: {tree_counts}')
+    print(f'Mean CatBoost feature importance across {len(fold_models)} folds.')
     print(f'Top {min(top_n, len(importance_df))} features:')
     print(importance_df.head(top_n).to_string(index=False, float_format=lambda value: f'{value:.4f}'))
 

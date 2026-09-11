@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '38_RF_Optuna_final',
+        'experiment_name': '39_catboost_selected_features_baseline',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -14,8 +14,11 @@ config = {
         'path_to_submission':           'outputs/submissions',
     },
     'training': {
-        'early_stopping_rounds': 500, # Patience for gradient boosting models.
         'fold_seed': 0xC0FFEE,
+    },
+    'evaluation': {
+        # Holdout остаётся исключённым из обучения независимо от этого переключателя.
+        'evaluate_holdout': True,
     },
     'dataloader_params': {
         'shuffle': True,
@@ -33,7 +36,7 @@ config = {
             'Fireplaces'],
     },
     'model': {
-        'active': 'random_forest',
+        'active': 'catboost',
 
         'models': {
 
@@ -72,8 +75,25 @@ config = {
                 'max_features': 0.4,
                 'bootstrap': False,
                 'random_state': 0xC0FFEE,
-                'n_jobs': -1,
+                'n_jobs': 15,
             },
+
+            'catboost': {
+                'iterations': 2000,
+                'learning_rate': 0.03,
+                'depth': 6,
+                'l2_leaf_reg': 3.0,
+                'loss_function': 'RMSE',
+                'eval_metric': 'RMSE',
+                'early_stopping_rounds': 200,
+                'use_best_model': True,
+                'nan_mode': 'Min',
+                'random_seed': '${general.seed}',
+                'task_type': 'CPU',
+                'thread_count': 15,
+                'verbose': False,
+                'allow_writing_files': False,
+            }, 
         },
     },
 }
