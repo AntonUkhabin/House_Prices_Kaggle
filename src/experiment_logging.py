@@ -3,6 +3,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import json
+
+from omegaconf import OmegaConf
 
 
 def print_section(title: str) -> None:
@@ -219,6 +223,95 @@ def print_catboost_diagnostics(fold_models, top_n=20) -> pd.DataFrame:
     print(importance_df.head(top_n).to_string(index=False, float_format=lambda value: f'{value:.4f}'))
 
     return importance_df
+
+
+def save_catboost_training_history(fold_models, config) -> Path:
+    '''Save CatBoost parameters and per-fold training histories to JSON.'''
+
+    if not fold_models:
+        raise ValueError('No fitted fold models provided.')
+
+    history = {
+        'experiment_name': config.general.experiment_name,
+        'model': config.model.active,
+        'target_transform': 'np.log',
+        'metric': 'RMSE',
+        'fold_seed': config.training.fold_seed,
+        'parameters': OmegaConf.to_container(config.model.models.catboost, resolve=True),
+        'folds': [],
+    }
+
+    for fold, pipe in enumerate(fold_models, start=1):
+        model = pipe.named_steps['model']
+        evals_result = model.get_evals_result()
+
+        # Сохраняем всю историю, включая patience после лучшей итерации, а не только сохранённые деревья.
+        history['folds'].append({
+            'fold': fold,
+            'best_iteration': int(model.get_best_iteration() + 1),
+            'trees_retained': int(model.tree_count_),
+            'train_rmse': [float(value) for value in evals_result['learn']['RMSE']],
+            'validation_rmse': [float(value) for value in evals_result['validation']['RMSE']],
+        })
+
+    output_dir = Path(config.paths.path_to_training_history)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = output_dir / f'{config.general.experiment_name}.json'
+
+    with output_path.open('w', encoding='utf-8') as file:
+        json.dump(history, file, ensure_ascii=False, indent=2, allow_nan=False)
+
+    print(f'Training history saved: {output_path}')
+
+    return output_path
+
+
+def save_catboost_learning_curves(history_path) -> Path:
+    '''Save per-fold learning curves alongside a CatBoost JSON history.'''
+
+    history_path = Path(history_path)
+
+    with history_path.open('r', encoding='utf-8') as file:
+        history = json.load(file)
+
+    folds = history['folds']
+
+    if not folds:
+        raise ValueError('Training history contains no folds.')
+
+    figure, axes = plt.subplots(len(folds), 1, figsize=(12, 3.5 * len(folds)), squeeze=False)
+    plot_path = history_path.with_suffix('.png')
+
+    try:
+        for axis, fold_history in zip(axes[:, 0], folds):
+            train_rmse = np.asarray(fold_history['train_rmse'])
+            validation_rmse = np.asarray(fold_history['validation_rmse'])
+            iterations = np.arange(1, len(validation_rmse) + 1)
+
+            # В JSON номер лучшей итерации сохранён с единицы, а индекс массива начинается с нуля.
+            best_iteration = fold_history['best_iteration']
+            best_rmse = validation_rmse[best_iteration - 1]
+
+            axis.plot(iterations, train_rmse, label='Train RMSE')
+            axis.plot(iterations, validation_rmse, label='Validation RMSE')
+            axis.axvline(best_iteration, color='red', linestyle='--', alpha=0.7, label=f'Best iteration: {best_iteration}')
+
+            axis.set_title(f'Fold {fold_history["fold"]} — RMSE(log) | Best validation: {best_rmse:.5f}')
+            axis.set_xlabel('Iteration')
+            axis.set_ylabel('RMSE(log)')
+            axis.grid(alpha=0.3)
+            axis.legend()
+
+        figure.suptitle(f'CatBoost training history — {history["experiment_name"]}', fontsize=14)
+        figure.tight_layout(rect=(0, 0, 1, 0.97))
+        figure.savefig(plot_path, dpi=150, bbox_inches='tight')
+    finally:
+        plt.close(figure)
+
+    print(f'Learning curves saved: {plot_path}')
+
+    return plot_path
 
 
 def print_submission_info(number_of_models) -> None:

@@ -3,15 +3,18 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '39_catboost_selected_features_baseline',
+        'experiment_name': '43_catboost_lr_01_optuna_tuned',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
         'path_to_kaggle_test':          './data/test.csv',
+        
         'path_to_logs':                 './outputs/logs',
         'path_to_oof':                  './outputs/oof',
         'path_to_holdout':              'outputs/holdout',
         'path_to_submission':           'outputs/submissions',
+        'path_to_training_history':     'outputs/training_history',
+        'path_to_shap':                 './outputs/shap',
     },
     'training': {
         'fold_seed': 0xC0FFEE,
@@ -19,6 +22,13 @@ config = {
     'evaluation': {
         # Holdout остаётся исключённым из обучения независимо от этого переключателя.
         'evaluate_holdout': True,
+    },
+    'logging': {
+        'save_training_history': True,
+    },
+    'shap': {
+        'enabled': True,
+        'max_display': 20,
     },
     'dataloader_params': {
         'shuffle': True,
@@ -79,10 +89,11 @@ config = {
             },
 
             'catboost': {
-                'iterations': 2000,
-                'learning_rate': 0.03,
-                'depth': 6,
-                'l2_leaf_reg': 3.0,
+                'iterations': 10000,
+                'learning_rate': 0.1,
+                'depth': 4,
+                'l2_leaf_reg': 2.21,
+                'random_strength': 1.99,
                 'loss_function': 'RMSE',
                 'eval_metric': 'RMSE',
                 'early_stopping_rounds': 200,

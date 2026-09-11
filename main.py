@@ -4,6 +4,7 @@ from time import perf_counter
 
 from config import config
 from src import experiment_logging as log
+from src import shap_analysis
 from src.data import load_data, split_train_holdout
 from src.train_functions import calculate_regression_metrics, cross_validate_model_with_early_stopping, cross_validate_standard, predict_with_pipeline_ensemble
 from src.utils import set_seed, setup_run_logging
@@ -47,6 +48,10 @@ def main() -> int:
         # Выводим диагностику, соответствующую активной модели.
         log.print_model_diagnostics(fold_models, config, top_n=20)
 
+        if config.logging.save_training_history and config.model.active == 'catboost':
+            history_path = log.save_catboost_training_history(fold_models, config)
+            log.save_catboost_learning_curves(history_path)
+
         # Метрики получают реальные цены в долларах и прогнозы в логарифмах.
         log.print_section('OOF Evaluation')
 
@@ -54,6 +59,23 @@ def main() -> int:
 
         log.print_regression_metrics('OOF', oof_metrics)
         log.save_oof_predictions(train_cv_df, oof_predictions, fold_ids, config)
+
+        if config.shap.enabled:
+            log.print_section('OOF SHAP Analysis')
+            shap_started = perf_counter()
+
+            shap_result = shap_analysis.calculate_oof_shap(
+                train_cv_df=train_cv_df,
+                target_col='SalePrice',
+                fold_models=fold_models,
+                fold_ids=fold_ids,
+            )
+
+            importance_df = shap_analysis.save_oof_shap(shap_result, config)
+            shap_analysis.save_shap_importance_plot(importance_df, config)
+            shap_analysis.save_shap_beeswarm_plot(shap_result, config)
+
+            print(f'SHAP runtime: {perf_counter() - shap_started:.1f} seconds')
 
         print(f'\nHoldout evaluation enabled: {config.evaluation.evaluate_holdout}')
 
