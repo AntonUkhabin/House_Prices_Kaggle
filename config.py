@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '35_lasso_tuned_alpha_000225',
+        'experiment_name': '38_RF_Optuna_final',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -33,7 +33,7 @@ config = {
             'Fireplaces'],
     },
     'model': {
-        'active': 'lasso',
+        'active': 'random_forest',
 
         'models': {
 
@@ -64,14 +64,13 @@ config = {
             },
 
             'random_forest': {
-                'n_estimators': 300,
+                'n_estimators': 900,
                 'criterion': 'squared_error',
-                'max_depth': None,
-                'min_samples_split': 2,
-                'min_samples_leaf': 1,
-                'max_features': 1.0,
-                'bootstrap': True,
-                'oob_score': False,
+                'max_depth': 12,
+                'min_samples_split': 4,
+                'min_samples_leaf': 2,
+                'max_features': 0.4,
+                'bootstrap': False,
                 'random_state': 0xC0FFEE,
                 'n_jobs': -1,
             },
