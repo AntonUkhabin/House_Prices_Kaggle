@@ -8,6 +8,8 @@ import json
 
 from omegaconf import OmegaConf
 
+from src.train_functions import get_boosting_training_info
+
 
 def print_section(title: str) -> None:
     '''Print a formatted section title.'''
@@ -77,6 +79,9 @@ def print_model_diagnostics(fold_models, config, top_n=20):
 
     if active_model == 'catboost':
         return print_catboost_diagnostics(fold_models, top_n=top_n)
+
+    if active_model == 'xgboost':
+        return print_xgboost_diagnostics(fold_models, config, top_n=top_n)
 
     raise ValueError(f'Unknown model for diagnostics: {active_model}')
 
@@ -225,33 +230,101 @@ def print_catboost_diagnostics(fold_models, top_n=20) -> pd.DataFrame:
     return importance_df
 
 
-def save_catboost_training_history(fold_models, config) -> Path:
-    '''Save CatBoost parameters and per-fold training histories to JSON.'''
+def print_xgboost_diagnostics(fold_models, config, top_n=20) -> pd.DataFrame:
+    '''Print XGBoost training details and normalized gain importance across folds.'''
 
     if not fold_models:
         raise ValueError('No fitted fold models provided.')
 
+    if top_n < 1:
+        raise ValueError('top_n must be a positive integer.')
+
+    fold_importances = []
+    feature_counts = []
+    best_iterations = []
+    iterations_run = []
+    iterations_used = []
+
+    for fold, pipe in enumerate(fold_models, start=1):
+        model = pipe.named_steps['model']
+        feature_names = pipe.named_steps['preprocessor'].get_feature_names_out()
+        training_info = get_boosting_training_info(model, config)
+
+        feature_counts.append(len(feature_names))
+        best_iterations.append(training_info['best_iteration'])
+        iterations_run.append(training_info['iterations_run'])
+        iterations_used.append(training_info['iterations_used'])
+
+        # Считаем gain только для раундов, используемых при predict после early stopping.
+        booster = model.get_booster()[:training_info['iterations_used']]
+
+        if booster.num_features() != len(feature_names):
+            raise ValueError('Feature names and model input have different lengths.')
+
+        gain_scores = booster.get_score(importance_type='gain')
+
+        # При обучении на numpy XGBoost обозначает столбцы как f0, f1 и далее.
+        booster_names = booster.feature_names
+        if booster_names is None:
+            booster_names = [f'f{index}' for index in range(len(feature_names))]
+
+        importances = np.asarray([gain_scores.get(name, 0.0) for name in booster_names], dtype=float)
+
+        # Нормируем каждый fold перед усреднением, чтобы привести важности к общей шкале.
+        total_importance = importances.sum()
+        if total_importance > 0:
+            importances /= total_importance
+
+        fold_importances.append(pd.Series(importances, index=feature_names, name=f'fold_{fold}'))
+
+    # Редкие категории могут давать разные наборы OHE-столбцов между folds.
+    importance_by_fold = pd.concat(fold_importances, axis=1).fillna(0)
+
+    importance_df = importance_by_fold.mean(axis=1).rename('importance').rename_axis('feature').reset_index()
+    importance_df = importance_df.sort_values('importance', ascending=False, kind='stable').reset_index(drop=True)
+
+    print_section('XGBoost Diagnostics')
+    print(f'Transformed features per fold: {min(feature_counts)}–{max(feature_counts)}')
+    print(f'Best iterations: {best_iterations}')
+    print(f'Iterations actually run: {iterations_run}')
+    print(f'Iterations used for prediction: {iterations_used}')
+    print(f'Mean normalized gain across {len(fold_models)} folds (after encoding, prediction rounds only).')
+    print(f'Top {min(top_n, len(importance_df))} features:')
+    print(importance_df.head(top_n).to_string(index=False, float_format=lambda value: f'{value:.4f}'))
+
+    return importance_df
+
+
+def save_boosting_training_history(fold_models, config) -> Path:
+    '''Save boosting parameters and per-fold training histories to JSON.'''
+
+    if not fold_models:
+        raise ValueError('No fitted fold models provided.')
+
+    active_model = config.model.active
+
     history = {
         'experiment_name': config.general.experiment_name,
-        'model': config.model.active,
+        'model': active_model,
         'target_transform': 'np.log',
         'metric': 'RMSE',
         'fold_seed': config.training.fold_seed,
-        'parameters': OmegaConf.to_container(config.model.models.catboost, resolve=True),
+        'parameters': OmegaConf.to_container(config.model.models[active_model], resolve=True),
         'folds': [],
     }
 
     for fold, pipe in enumerate(fold_models, start=1):
         model = pipe.named_steps['model']
-        evals_result = model.get_evals_result()
+        training_info = get_boosting_training_info(model, config)
 
-        # Сохраняем всю историю, включая patience после лучшей итерации, а не только сохранённые деревья.
+        # Сохраняем всю историю, включая раунды ожидания после best iteration.
         history['folds'].append({
             'fold': fold,
-            'best_iteration': int(model.get_best_iteration() + 1),
-            'trees_retained': int(model.tree_count_),
-            'train_rmse': [float(value) for value in evals_result['learn']['RMSE']],
-            'validation_rmse': [float(value) for value in evals_result['validation']['RMSE']],
+            'best_iteration': training_info['best_iteration'],
+            'iterations_run': training_info['iterations_run'],
+            'iterations_used': training_info['iterations_used'],
+            'train_rmse': [float(value) for value in training_info['train_rmse']],
+            'validation_rmse': [float(value) for value in training_info['validation_rmse']],
         })
 
     output_dir = Path(config.paths.path_to_training_history)
@@ -267,8 +340,8 @@ def save_catboost_training_history(fold_models, config) -> Path:
     return output_path
 
 
-def save_catboost_learning_curves(history_path) -> Path:
-    '''Save per-fold learning curves alongside a CatBoost JSON history.'''
+def save_boosting_learning_curves(history_path) -> Path:
+    '''Save per-fold learning curves alongside a boosting JSON history.'''
 
     history_path = Path(history_path)
 
@@ -303,7 +376,9 @@ def save_catboost_learning_curves(history_path) -> Path:
             axis.grid(alpha=0.3)
             axis.legend()
 
-        figure.suptitle(f'CatBoost training history — {history["experiment_name"]}', fontsize=14)
+        model_name = {'catboost': 'CatBoost', 'xgboost': 'XGBoost'}.get(history['model'], history['model'])
+        experiment_name = history['experiment_name']
+        figure.suptitle(f'{model_name} training history — {experiment_name}', fontsize=14)
         figure.tight_layout(rect=(0, 0, 1, 0.97))
         figure.savefig(plot_path, dpi=150, bbox_inches='tight')
     finally:

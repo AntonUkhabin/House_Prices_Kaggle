@@ -38,7 +38,7 @@ def main() -> int:
         # Каждый фолд обучает свой пайплайн; модели сохраняются для ансамбля.
         log.print_cv_start(config)
 
-        if config.model.active == 'catboost':
+        if config.model.active in ('catboost', 'xgboost'):
             scores, fold_models, oof_predictions, fold_ids = cross_validate_model_with_early_stopping(train_cv_df, 'SalePrice', config)
         else:
             scores, fold_models, oof_predictions, fold_ids = cross_validate_standard(train_cv_df, 'SalePrice', config)
@@ -48,9 +48,9 @@ def main() -> int:
         # Выводим диагностику, соответствующую активной модели.
         log.print_model_diagnostics(fold_models, config, top_n=20)
 
-        if config.logging.save_training_history and config.model.active == 'catboost':
-            history_path = log.save_catboost_training_history(fold_models, config)
-            log.save_catboost_learning_curves(history_path)
+        if config.logging.save_training_history and config.model.active in ('catboost', 'xgboost'):
+            history_path = log.save_boosting_training_history(fold_models, config)
+            log.save_boosting_learning_curves(history_path)
 
         # Метрики получают реальные цены в долларах и прогнозы в логарифмах.
         log.print_section('OOF Evaluation')

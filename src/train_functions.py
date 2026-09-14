@@ -7,6 +7,7 @@ from sklearn.pipeline           import Pipeline
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 from catboost import CatBoostRegressor
+from xgboost import XGBRegressor
 
 from src.preprocessing          import build_preprocessor
 from src.feature_engineering import SelectedLog1pTransformer
@@ -39,6 +40,9 @@ def build_model(config, categorical_features=None):
 
         return CatBoostRegressor(cat_features=list(categorical_features), **model_params)
 
+    if active_model == 'xgboost':
+        return XGBRegressor(**model_params)
+
     raise ValueError(f'Unknown model name: {active_model}')
 
 
@@ -47,8 +51,8 @@ def build_feature_pipeline(config) -> Pipeline:
 
     steps = []
 
-    # Сохраняем прежний log1p для существующих моделей; CatBoost получает признаки в исходной шкале.
-    if config.model.active != 'catboost':
+    # CatBoost и XGBoost получают числовые признаки в исходной шкале.
+    if config.model.active not in ('catboost', 'xgboost'):
         steps.append(('selected_log1p', SelectedLog1pTransformer()))
 
     steps.append(('preprocessor', build_preprocessor(config)))
@@ -66,10 +70,20 @@ def build_pipeline(config) -> Pipeline:
 
 
 def fit_model_with_early_stopping(model, features_train, labels_train, features_val, labels_val, config):
-    '''Fit a boosting estimator using a validation set for early stopping.'''
+    '''Fit a boosting estimator using model-specific early stopping.'''
 
     if config.model.active == 'catboost':
         model.fit(features_train, labels_train, eval_set=(features_val, labels_val))
+        return model
+
+    if config.model.active == 'xgboost':
+        # Сохраняем обе кривые; последний eval_set используется для early stopping.
+        model.fit(
+            features_train,
+            labels_train,
+            eval_set=[(features_train, labels_train), (features_val, labels_val)],
+            verbose=False,
+        )
         return model
 
     raise ValueError(f'Early stopping is not supported for model: {config.model.active}')
@@ -144,6 +158,36 @@ def cross_validate_standard(train_cv_df, target_col, config):
     return scores, fold_models, oof_predictions, fold_ids
 
 
+def get_boosting_training_info(model, config):
+    '''Return training curves and iteration counts for a fitted boosting model.'''
+
+    if config.model.active == 'catboost':
+        history = model.get_evals_result()
+
+        return {
+            'train_rmse': history['learn']['RMSE'],
+            'validation_rmse': history['validation']['RMSE'],
+            'best_iteration': int(model.get_best_iteration() + 1),
+            'iterations_run': len(history['validation']['RMSE']),
+            'iterations_used': int(model.tree_count_),
+        }
+
+    if config.model.active == 'xgboost':
+        history = model.evals_result()
+        best_iteration = int(model.best_iteration + 1)
+
+        # XGBRegressor.predict автоматически ограничивает прогноз best_iteration.
+        return {
+            'train_rmse': history['validation_0']['rmse'],
+            'validation_rmse': history['validation_1']['rmse'],
+            'best_iteration': best_iteration,
+            'iterations_run': len(history['validation_1']['rmse']),
+            'iterations_used': best_iteration,
+        }
+
+    raise ValueError(f'Training history is not supported for model: {config.model.active}')
+
+
 def cross_validate_model_with_early_stopping(train_cv_df, target_col, config):
     '''Run cross-validation with fold-specific early stopping and OOF predictions.'''
 
@@ -184,13 +228,14 @@ def cross_validate_model_with_early_stopping(train_cv_df, target_col, config):
         fold_models.append(fold_pipe)
 
         model = fold_pipe.named_steps['model']
+        training_info = get_boosting_training_info(model, config)
 
-        # CatBoost возвращает индекс лучшей итерации с нуля; в логе показываем номер с единицы.
-        best_iteration = model.get_best_iteration() + 1
-        iterations_run = len(model.get_evals_result()['validation']['RMSE'])
+        best_iteration = training_info['best_iteration']
+        iterations_run = training_info['iterations_run']
+        iterations_used = training_info['iterations_used']
 
-        print(f'Fold {fold + 1}: RMSE(log) = {score:.5f}, best iteration = {best_iteration}, iterations run = {iterations_run}, trees retained = {model.tree_count_}')
-
+        print(f'Fold {fold + 1}: RMSE(log) = {score:.5f}, best iteration = {best_iteration}, iterations run = {iterations_run}, iterations used = {iterations_used}')
+    
     return scores, fold_models, oof_predictions, fold_ids
 
 

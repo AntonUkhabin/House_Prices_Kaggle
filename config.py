@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '43_catboost_lr_01_optuna_tuned',
+        'experiment_name': '44_xgboost_selected_features_baseline',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -27,7 +27,7 @@ config = {
         'save_training_history': True,
     },
     'shap': {
-        'enabled': True,
+        'enabled': False,
         'max_display': 20,
     },
     'dataloader_params': {
@@ -46,7 +46,7 @@ config = {
             'Fireplaces'],
     },
     'model': {
-        'active': 'catboost',
+        'active': 'xgboost',
 
         'models': {
 
@@ -104,7 +104,26 @@ config = {
                 'thread_count': 15,
                 'verbose': False,
                 'allow_writing_files': False,
-            }, 
+            },
+            
+            'xgboost': {
+                'n_estimators': 10000,
+                'learning_rate': 0.05,
+                'max_depth': 4,
+                'min_child_weight': 1.0,
+                'subsample': 1.0,
+                'colsample_bytree': 1.0,
+                'reg_alpha': 0.0,
+                'reg_lambda': 1.0,
+                'objective': 'reg:squarederror',
+                'eval_metric': 'rmse',
+                'early_stopping_rounds': 200,
+                'tree_method': 'hist',
+                'importance_type': 'gain',
+                'random_state': '${general.seed}',
+                'n_jobs': 15,
+                'verbosity': 1,
+            },
         },
     },
 }

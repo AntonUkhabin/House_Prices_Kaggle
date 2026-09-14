@@ -139,6 +139,9 @@ def build_preprocessor(config):
     if active_model == 'catboost':
         return build_catboost_preprocessor(config)
 
+    if active_model == 'xgboost':
+        return build_xgboost_preprocessor(config)
+
     raise ValueError(f'Unknown preprocessor for model: {active_model}')
 
 
@@ -197,4 +200,26 @@ def build_catboost_preprocessor(config) -> Pipeline:
         # Structural missing обрабатываем до удаления колонок: некоторые из них нужны для определения отсутствия объекта.
         ('structural_missing', StructuralMissingTransformer()),
         ('catboost_features', CatBoostPreprocessor(drop_columns=list(config.preprocessing.drop_columns))),
+    ])
+
+
+def build_xgboost_preprocessor(config) -> Pipeline:
+    '''Build XGBoost preprocessing with native numerical missing values and one-hot categories.'''
+
+    drop_columns = list(config.preprocessing.drop_columns)
+
+    categorical_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='constant', fill_value='Unknown', keep_empty_features=True)),
+        ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False)),
+    ])
+
+    column_transformer = ColumnTransformer([
+        ('numerical', 'passthrough', ColumnSelector('numerical', drop_columns)),
+        ('categorical', categorical_pipeline, ColumnSelector('categorical', drop_columns)),
+    ], remainder='drop')
+
+    return Pipeline([
+        # Structural missing определяем до удаления колонок, нужных для проверки отсутствия объекта.
+        ('structural_missing', StructuralMissingTransformer()),
+        ('columns', column_transformer),
     ])
