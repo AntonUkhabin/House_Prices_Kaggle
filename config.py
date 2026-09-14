@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '44_xgboost_selected_features_baseline',
+        'experiment_name': '46_xgboost_optuna_tuned',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -108,13 +108,13 @@ config = {
             
             'xgboost': {
                 'n_estimators': 10000,
-                'learning_rate': 0.05,
-                'max_depth': 4,
-                'min_child_weight': 1.0,
-                'subsample': 1.0,
-                'colsample_bytree': 1.0,
+                'learning_rate': 0.053,
+                'max_depth': 2,
+                'min_child_weight': 3,
+                'subsample': 0.82,
+                'colsample_bytree': 0.686,
                 'reg_alpha': 0.0,
-                'reg_lambda': 1.0,
+                'reg_lambda': 4.06,
                 'objective': 'reg:squarederror',
                 'eval_metric': 'rmse',
                 'early_stopping_rounds': 200,
