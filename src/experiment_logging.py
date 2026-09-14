@@ -39,7 +39,10 @@ def print_data_info(train_df, train_cv_df, holdout_df, test_df, config) -> None:
     print(f'Holdout: {holdout_df.shape}')
     print(f'Kaggle test: {test_df.shape}')
     print(f'Holdout fraction: {config.split.test_size}')
-    print(f'Excluded columns: {list(config.preprocessing.drop_columns)}')
+    if config.model.active == 'knn':
+        print(f'Selected KNN features: {list(config.preprocessing.knn_features)}')
+    else:
+        print(f'Excluded columns: {list(config.preprocessing.drop_columns)}')
 
 
 def print_model_info(config) -> None:
@@ -82,6 +85,9 @@ def print_model_diagnostics(fold_models, config, top_n=20):
 
     if active_model == 'xgboost':
         return print_xgboost_diagnostics(fold_models, config, top_n=top_n)
+
+    if active_model == 'knn':
+        return print_knn_diagnostics(fold_models, config)
 
     raise ValueError(f'Unknown model for diagnostics: {active_model}')
 
@@ -293,6 +299,44 @@ def print_xgboost_diagnostics(fold_models, config, top_n=20) -> pd.DataFrame:
     print(importance_df.head(top_n).to_string(index=False, float_format=lambda value: f'{value:.4f}'))
 
     return importance_df
+
+
+def print_knn_diagnostics(fold_models, config) -> pd.DataFrame:
+    '''Print KNN feature space and fitted sample counts across folds.'''
+
+    if not fold_models:
+        raise ValueError('No fitted fold models provided.')
+
+    feature_names_by_fold = []
+    fitted_sample_counts = []
+    effective_metrics = []
+
+    for pipe in fold_models:
+        model = pipe.named_steps['model']
+        feature_names = pipe.named_steps['preprocessor'].get_feature_names_out().tolist()
+
+        feature_names_by_fold.append(feature_names)
+        fitted_sample_counts.append(int(model.n_samples_fit_))
+        effective_metrics.append(model.effective_metric_)
+
+    reference_features = feature_names_by_fold[0]
+
+    if any(feature_names != reference_features for feature_names in feature_names_by_fold[1:]):
+        raise ValueError('KNN feature names differ between folds.')
+
+    diagnostics_df = pd.DataFrame({'feature': reference_features})
+
+    print_section('KNN Diagnostics')
+    print(f'Features per fold: {len(reference_features)}')
+    print(f'Fitted rows per fold: {min(fitted_sample_counts)}–{max(fitted_sample_counts)}')
+    print(f'Neighbors: {config.model.models.knn.n_neighbors}')
+    print(f'Weights: {config.model.models.knn.weights}')
+    print(f'Configured metric: {config.model.models.knn.metric}, p={config.model.models.knn.p}')
+    print(f'Effective metrics: {effective_metrics}')
+    print('Features:')
+    print(diagnostics_df.to_string(index=False))
+
+    return diagnostics_df
 
 
 def save_boosting_training_history(fold_models, config) -> Path:

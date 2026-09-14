@@ -142,6 +142,9 @@ def build_preprocessor(config):
     if active_model == 'xgboost':
         return build_xgboost_preprocessor(config)
 
+    if active_model == 'knn':
+        return build_knn_preprocessor(config)
+
     raise ValueError(f'Unknown preprocessor for model: {active_model}')
 
 
@@ -223,3 +226,18 @@ def build_xgboost_preprocessor(config) -> Pipeline:
         ('structural_missing', StructuralMissingTransformer()),
         ('columns', column_transformer),
     ])
+
+
+def build_knn_preprocessor(config) -> ColumnTransformer:
+    '''Build median imputation and scaling for selected KNN features.'''
+
+    selected_features = list(config.preprocessing.knn_features)
+
+    numerical_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='median', keep_empty_features=True)),
+        ('scaler', StandardScaler()),
+    ])
+
+    return ColumnTransformer([
+        ('numerical', numerical_pipeline, selected_features),
+    ], remainder='drop', verbose_feature_names_out=False)

@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '46_xgboost_optuna_tuned',
+        'experiment_name': '47_knn_numeric_baseline',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -24,7 +24,7 @@ config = {
         'evaluate_holdout': True,
     },
     'logging': {
-        'save_training_history': True,
+        'save_training_history': False,
     },
     'shap': {
         'enabled': False,
@@ -44,9 +44,10 @@ config = {
         'drop_columns': ['Utilities', 'Condition2', 'BsmtUnfSF', 'BldgType', 'HouseStyle', 'Exterior2nd', 'GarageQual',
             'Street', 'Alley', 'RoofMatl', 'Heating', 'LowQualFinSF', 'PoolQC', 'BedroomAbvGr', 'TotRmsAbvGrd', 'GarageYrBlt', 'MasVnrArea',
             'Fireplaces'],
+        'knn_features': ['OverallQual', 'GrLivArea', 'TotalBsmtSF', 'GarageCars', 'FullBath', 'YearBuilt', 'YearRemodAdd',],
     },
     'model': {
-        'active': 'xgboost',
+        'active': 'knn',
 
         'models': {
 
@@ -123,6 +124,15 @@ config = {
                 'random_state': '${general.seed}',
                 'n_jobs': 15,
                 'verbosity': 1,
+            },
+            'knn': {
+                'n_neighbors': 5,
+                'weights': 'uniform',
+                'algorithm': 'auto',
+                'leaf_size': 30,
+                'p': 2,
+                'metric': 'minkowski',
+                'n_jobs': 15,
             },
         },
     },

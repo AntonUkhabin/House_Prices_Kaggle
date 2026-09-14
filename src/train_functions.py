@@ -8,6 +8,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 from catboost import CatBoostRegressor
 from xgboost import XGBRegressor
+from sklearn.neighbors import KNeighborsRegressor
 
 from src.preprocessing          import build_preprocessor
 from src.feature_engineering import SelectedLog1pTransformer
@@ -33,6 +34,9 @@ def build_model(config, categorical_features=None):
     
     if active_model == 'random_forest':
         return RandomForestRegressor(**model_params)
+
+    if active_model == 'knn':
+        return KNeighborsRegressor(**model_params)
 
     if active_model == 'catboost':
         if categorical_features is None:
