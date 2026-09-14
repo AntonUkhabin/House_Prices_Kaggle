@@ -4,7 +4,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 from sklearn.utils.validation import check_is_fitted
 
 
@@ -125,6 +125,91 @@ class CatBoostPreprocessor(BaseEstimator, TransformerMixin):
         return np.asarray(self.selected_features_, dtype=object)
 
 
+class DNNPreprocessor(BaseEstimator, TransformerMixin):
+    '''Prepare numerical features and categorical indices for a tabular DNN.'''
+
+    def __init__(self, drop_columns=()):
+        self.drop_columns = drop_columns
+
+    def fit(self, features, labels=None):
+        '''Fit numerical transformations and categorical vocabularies.'''
+
+        self.feature_names_in_ = np.asarray(features.columns, dtype=object)
+        selected_features = features.drop(columns=['Id', *self.drop_columns], errors='ignore')
+
+        self.selected_features_ = selected_features.columns.tolist()
+        self.numerical_features_ = selected_features.select_dtypes(include=np.number).columns.tolist()
+        self.categorical_features_ = selected_features.select_dtypes(exclude=np.number).columns.tolist()
+
+        self.numerical_imputer_ = SimpleImputer(strategy='median', keep_empty_features=True)
+        numerical_imputed = self.numerical_imputer_.fit_transform(selected_features[self.numerical_features_])
+
+        self.numerical_scaler_ = StandardScaler()
+        self.numerical_scaler_.fit(numerical_imputed)
+
+        self.category_maps_ = {}
+
+        for feature in self.categorical_features_:
+            normalized = self._normalize_categories(selected_features[feature])
+
+            # Индекс 0 зарезервирован одновременно для missing и unseen categories.
+            known_categories = sorted(category for category in normalized.unique() if category != 'Unknown')
+            self.category_maps_[feature] = {
+                category: index
+                for index, category in enumerate(['Unknown', *known_categories])
+            }
+
+        self.category_cardinalities_ = [
+            len(self.category_maps_[feature])
+            for feature in self.categorical_features_
+        ]
+
+        return self
+
+    def transform(self, features):
+        '''Transform features into numerical values and categorical indices.'''
+
+        check_is_fitted(self, ['selected_features_', 'numerical_features_', 'categorical_features_', 'numerical_imputer_', 'numerical_scaler_', 
+                'category_maps_', 'category_cardinalities_'])
+
+        selected_features = features.loc[:, self.selected_features_]
+
+        numerical_features = self.numerical_imputer_.transform(selected_features[self.numerical_features_])
+        numerical_features = self.numerical_scaler_.transform(numerical_features).astype(np.float32)
+
+        categorical_columns = []
+
+        for feature in self.categorical_features_:
+            normalized = self._normalize_categories(selected_features[feature])
+            category_map = self.category_maps_[feature]
+
+            # Новые категории validation/test переводятся в зарезервированный индекс 0.
+            encoded = normalized.map(category_map).fillna(0).to_numpy(dtype=np.int64)
+            categorical_columns.append(encoded)
+
+        if categorical_columns:
+            categorical_features = np.column_stack(categorical_columns)
+        else:
+            categorical_features = np.empty((len(selected_features), 0), dtype=np.int64)
+
+        return {
+            'numerical': numerical_features,
+            'categorical': categorical_features,
+        }
+
+    def get_feature_names_out(self, input_features=None):
+        '''Return selected input feature names.'''
+
+        check_is_fitted(self, 'selected_features_')
+        return np.asarray(self.selected_features_, dtype=object)
+
+    @staticmethod
+    def _normalize_categories(feature):
+        '''Convert missing and categorical values into stable strings.'''
+
+        return feature.astype('object').where(feature.notna(), 'Unknown').astype(str)
+
+
 def build_preprocessor(config):
     '''Build preprocessing for the active model.'''
 
@@ -144,6 +229,9 @@ def build_preprocessor(config):
 
     if active_model == 'knn':
         return build_knn_preprocessor(config)
+
+    if active_model == 'dnn':
+        return build_dnn_preprocessor(config)
 
     raise ValueError(f'Unknown preprocessor for model: {active_model}')
 
@@ -229,15 +317,49 @@ def build_xgboost_preprocessor(config) -> Pipeline:
 
 
 def build_knn_preprocessor(config) -> ColumnTransformer:
-    '''Build median imputation and scaling for selected KNN features.'''
+    '''Build model-specific preprocessing for selected KNN features.'''
 
     selected_features = list(config.preprocessing.knn_features)
+    ordinal_features = list(config.preprocessing.knn_ordinal_features)
+    nominal_features = list(config.preprocessing.knn_nominal_features)
+    categorical_features = ordinal_features + nominal_features
+    numerical_features = [feature for feature in selected_features if feature not in categorical_features]
+
+    quality_order = ['Po', 'Fa', 'TA', 'Gd', 'Ex']
 
     numerical_pipeline = Pipeline([
         ('imputer', SimpleImputer(strategy='median', keep_empty_features=True)),
         ('scaler', StandardScaler()),
     ])
 
+    ordinal_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='most_frequent', keep_empty_features=True)),
+        # Сохраняем естественный порядок quality features перед расчётом расстояний.
+        ('encoder', OrdinalEncoder(
+            categories=[quality_order] * len(ordinal_features),
+            handle_unknown='use_encoded_value',
+            unknown_value=-1,
+        )),
+        ('scaler', StandardScaler()),
+    ])
+
+    nominal_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='most_frequent', keep_empty_features=True)),
+        # Незнакомый район при inference получает нули во всех обученных OHE-колонках.
+        ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False)),
+    ])
+
     return ColumnTransformer([
-        ('numerical', numerical_pipeline, selected_features),
+        ('numerical', numerical_pipeline, numerical_features),
+        ('ordinal', ordinal_pipeline, ordinal_features),
+        ('nominal', nominal_pipeline, nominal_features),
     ], remainder='drop', verbose_feature_names_out=False)
+
+
+def build_dnn_preprocessor(config) -> Pipeline:
+    '''Build fold-specific preprocessing for a tabular DNN with embeddings.'''
+
+    return Pipeline([
+        ('structural_missing', StructuralMissingTransformer()),
+        ('dnn_features', DNNPreprocessor(drop_columns=list(config.preprocessing.drop_columns))),
+    ])

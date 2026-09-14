@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '47_knn_numeric_baseline',
+        'experiment_name': '49_dnn_embeddings_baseline',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -14,6 +14,7 @@ config = {
         'path_to_holdout':              'outputs/holdout',
         'path_to_submission':           'outputs/submissions',
         'path_to_training_history':     'outputs/training_history',
+        'path_to_checkpoints':          'outputs/checkpoints',
         'path_to_shap':                 './outputs/shap',
     },
     'training': {
@@ -24,7 +25,8 @@ config = {
         'evaluate_holdout': True,
     },
     'logging': {
-        'save_training_history': False,
+        'save_training_history': True,
+        'training_log_interval': 10,
     },
     'shap': {
         'enabled': False,
@@ -42,14 +44,26 @@ config = {
     }, 
     'preprocessing': {
         'drop_columns': ['Utilities', 'Condition2', 'BsmtUnfSF', 'BldgType', 'HouseStyle', 'Exterior2nd', 'GarageQual',
-            'Street', 'Alley', 'RoofMatl', 'Heating', 'LowQualFinSF', 'PoolQC', 'BedroomAbvGr', 'TotRmsAbvGrd', 'GarageYrBlt', 'MasVnrArea',
-            'Fireplaces'],
-        'knn_features': ['OverallQual', 'GrLivArea', 'TotalBsmtSF', 'GarageCars', 'FullBath', 'YearBuilt', 'YearRemodAdd',],
+            'Street', 'Alley', 'RoofMatl', 'Heating', 'LowQualFinSF', 'PoolQC', 'BedroomAbvGr', 'TotRmsAbvGrd', 'GarageYrBlt', 'MasVnrArea', 'Fireplaces'],
+
+        'knn_features': ['OverallQual', 'GrLivArea', 'TotalBsmtSF', 'GarageCars', 'FullBath', 'YearBuilt', 'YearRemodAdd', 'KitchenQual', 'ExterQual', 'Neighborhood'],
+        'knn_ordinal_features': ['KitchenQual', 'ExterQual'],
+        'knn_nominal_features': ['Neighborhood'],
     },
     'model': {
-        'active': 'knn',
+        'active': 'dnn',
 
         'models': {
+
+            'dnn': {
+                'epochs': 500,
+                'batch_size': 32,
+                'learning_rate': 0.001,
+                'weight_decay': 0.0001,
+                'early_stopping_rounds': 30,
+                'min_delta': 0.0001,
+                'num_workers': 0,
+            },
 
             'linear_regression': {
                 'fit_intercept': True,
@@ -125,6 +139,7 @@ config = {
                 'n_jobs': 15,
                 'verbosity': 1,
             },
+
             'knn': {
                 'n_neighbors': 5,
                 'weights': 'uniform',

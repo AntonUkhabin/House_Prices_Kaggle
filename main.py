@@ -8,6 +8,7 @@ from src import shap_analysis
 from src.data import load_data, split_train_holdout
 from src.train_functions import calculate_regression_metrics, cross_validate_model_with_early_stopping, cross_validate_standard, predict_with_pipeline_ensemble
 from src.utils import set_seed, setup_run_logging
+from src.torch_training import cross_validate_neural_network
 
 import warnings
 # Не выводим ожидаемые предупреждения о новых категориях:
@@ -38,7 +39,9 @@ def main() -> int:
         # Каждый фолд обучает свой пайплайн; модели сохраняются для ансамбля.
         log.print_cv_start(config)
 
-        if config.model.active in ('catboost', 'xgboost'):
+        if config.model.active == 'dnn':
+            scores, fold_models, oof_predictions, fold_ids = cross_validate_neural_network(train_cv_df, 'SalePrice', config)
+        elif config.model.active in ('catboost', 'xgboost'):
             scores, fold_models, oof_predictions, fold_ids = cross_validate_model_with_early_stopping(train_cv_df, 'SalePrice', config)
         else:
             scores, fold_models, oof_predictions, fold_ids = cross_validate_standard(train_cv_df, 'SalePrice', config)
@@ -48,9 +51,13 @@ def main() -> int:
         # Выводим диагностику, соответствующую активной модели.
         log.print_model_diagnostics(fold_models, config, top_n=20)
 
-        if config.logging.save_training_history and config.model.active in ('catboost', 'xgboost'):
-            history_path = log.save_boosting_training_history(fold_models, config)
-            log.save_boosting_learning_curves(history_path)
+        if config.logging.save_training_history:
+            if config.model.active in ('catboost', 'xgboost'):
+                history_path = log.save_boosting_training_history(fold_models, config)
+                log.save_boosting_learning_curves(history_path)
+            elif config.model.active == 'dnn':
+                history_path = log.save_dnn_training_history(fold_models, config)
+                log.save_dnn_learning_curves(history_path)
 
         # Метрики получают реальные цены в долларах и прогнозы в логарифмах.
         log.print_section('OOF Evaluation')

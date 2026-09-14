@@ -89,6 +89,9 @@ def print_model_diagnostics(fold_models, config, top_n=20):
     if active_model == 'knn':
         return print_knn_diagnostics(fold_models, config)
 
+    if active_model == 'dnn':
+        return print_dnn_diagnostics(fold_models)
+
     raise ValueError(f'Unknown model for diagnostics: {active_model}')
 
 
@@ -339,6 +342,52 @@ def print_knn_diagnostics(fold_models, config) -> pd.DataFrame:
     return diagnostics_df
 
 
+def print_dnn_diagnostics(fold_models) -> pd.DataFrame:
+    '''Print DNN architecture and fold-specific training diagnostics.'''
+
+    if not fold_models:
+        raise ValueError('No fitted DNN fold models provided.')
+
+    diagnostics = []
+
+    for fold_model in fold_models:
+        model = fold_model.model
+        dnn_preprocessor = fold_model.preprocessor.named_steps['preprocessor'].named_steps['dnn_features']
+        trainable_parameters = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
+
+        diagnostics.append({
+            'fold': fold_model.fold,
+            'numerical_features': len(dnn_preprocessor.numerical_features_),
+            'categorical_features': len(dnn_preprocessor.categorical_features_),
+            'embedding_size': sum(model.embedding_dims),
+            'trainable_parameters': trainable_parameters,
+            'best_epoch': fold_model.best_epoch,
+            'epochs_run': len(fold_model.history['validation_rmse']),
+            'best_validation_rmse': fold_model.best_validation_rmse,
+        })
+
+    diagnostics_df = pd.DataFrame(diagnostics)
+
+    reference_model = fold_models[0].model
+    linear_layers = [layer for layer in reference_model.mlp if hasattr(layer, 'in_features')]
+    mlp_dimensions = [linear_layers[0].in_features, *[layer.out_features for layer in linear_layers]]
+    activations = [layer.__class__.__name__ for layer in reference_model.mlp if layer.__class__.__name__ not in ('Linear', 'Dropout')]
+    dropout_rates = [layer.p for layer in reference_model.mlp if layer.__class__.__name__ == 'Dropout']
+
+    print_section('DNN Diagnostics')
+    print(f'MLP dimensions: {mlp_dimensions}')
+    print(f'Activations: {activations}')
+    print(f'Dropout rates: {dropout_rates}')
+    print(f'Embedding dimensions: {reference_model.embedding_dims}')
+    print(f'Best epochs: {diagnostics_df["best_epoch"].tolist()}')
+    print(f'Epochs actually run: {diagnostics_df["epochs_run"].tolist()}')
+    print(f'Trainable parameters per fold: {diagnostics_df["trainable_parameters"].tolist()}')
+    print('Fold diagnostics:')
+    print(diagnostics_df.to_string(index=False, float_format=lambda value: f'{value:.5f}'))
+
+    return diagnostics_df
+
+
 def save_boosting_training_history(fold_models, config) -> Path:
     '''Save boosting parameters and per-fold training histories to JSON.'''
 
@@ -551,3 +600,98 @@ def save_submission(test_df, predictions_log, config):
     print(f'Submission saved: {output_path}')
 
     return submission_df
+
+
+def save_dnn_training_history(fold_models, config) -> Path:
+    '''Save DNN parameters, architectures and per-fold training histories to JSON.'''
+
+    if not fold_models:
+        raise ValueError('No fitted DNN fold models provided.')
+
+    history = {
+        'experiment_name': config.general.experiment_name,
+        'model': 'dnn',
+        'target_transform': 'np.log with fold-specific standardization',
+        'metric': 'RMSE',
+        'fold_seed': config.training.fold_seed,
+        'parameters': OmegaConf.to_container(config.model.models.dnn, resolve=True),
+        'folds': [],
+    }
+
+    for fold_model in fold_models:
+        model = fold_model.model
+        dnn_preprocessor = fold_model.preprocessor.named_steps['preprocessor'].named_steps['dnn_features']
+        linear_layers = [layer for layer in model.mlp if hasattr(layer, 'in_features')]
+
+        history['folds'].append({
+            'fold': fold_model.fold,
+            'best_epoch': fold_model.best_epoch,
+            'epochs_run': len(fold_model.history['validation_rmse']),
+            'best_validation_rmse': fold_model.best_validation_rmse,
+            'target_mean': fold_model.target_mean,
+            'target_std': fold_model.target_std,
+            'numerical_features': len(dnn_preprocessor.numerical_features_),
+            'categorical_features': len(dnn_preprocessor.categorical_features_),
+            'embedding_dimensions': model.embedding_dims,
+            'mlp_dimensions': [linear_layers[0].in_features, *[layer.out_features for layer in linear_layers]],
+            'activations': [layer.__class__.__name__ for layer in model.mlp if layer.__class__.__name__ not in ('Linear', 'Dropout')],
+            'dropout_rates': [layer.p for layer in model.mlp if layer.__class__.__name__ == 'Dropout'],
+            'trainable_parameters': sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad),
+            'train_rmse': [float(value) for value in fold_model.history['train_rmse']],
+            'validation_rmse': [float(value) for value in fold_model.history['validation_rmse']],
+            'learning_rate': [float(value) for value in fold_model.history['learning_rate']],
+        })
+
+    output_dir = Path(config.paths.path_to_training_history)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f'{config.general.experiment_name}.json'
+
+    with output_path.open('w', encoding='utf-8') as file:
+        json.dump(history, file, ensure_ascii=False, indent=2, allow_nan=False)
+
+    print(f'DNN training history saved: {output_path}')
+    return output_path
+
+
+def save_dnn_learning_curves(history_path) -> Path:
+    '''Save per-fold DNN learning curves alongside their JSON history.'''
+
+    history_path = Path(history_path)
+
+    with history_path.open('r', encoding='utf-8') as file:
+        history = json.load(file)
+
+    folds = history['folds']
+
+    if not folds:
+        raise ValueError('DNN training history contains no folds.')
+
+    figure, axes = plt.subplots(len(folds), 1, figsize=(12, 3.5 * len(folds)), squeeze=False)
+    plot_path = history_path.with_suffix('.png')
+
+    try:
+        for axis, fold_history in zip(axes[:, 0], folds):
+            train_rmse = np.asarray(fold_history['train_rmse'])
+            validation_rmse = np.asarray(fold_history['validation_rmse'])
+            epochs = np.arange(1, len(validation_rmse) + 1)
+            best_epoch = fold_history['best_epoch']
+            best_rmse = fold_history['best_validation_rmse']
+
+            axis.plot(epochs, train_rmse, label='Train RMSE')
+            axis.plot(epochs, validation_rmse, label='Validation RMSE')
+            axis.axvline(best_epoch, color='red', linestyle='--', alpha=0.7, label=f'Best epoch: {best_epoch}')
+
+            axis.set_title(f'Fold {fold_history["fold"]} — RMSE(log) | Best validation: {best_rmse:.5f}')
+            axis.set_xlabel('Epoch')
+            axis.set_ylabel('RMSE(log)')
+            axis.grid(alpha=0.3)
+            axis.legend()
+
+        figure.suptitle(f'DNN training history — {history["experiment_name"]}', fontsize=16)
+        figure.tight_layout(rect=[0, 0, 1, 0.98])
+        figure.savefig(plot_path, dpi=150, bbox_inches='tight')
+    finally:
+        plt.close(figure)
+
+    print(f'DNN learning curves saved: {plot_path}')
+    return plot_path
