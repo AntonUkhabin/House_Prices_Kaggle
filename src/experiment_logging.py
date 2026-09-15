@@ -41,6 +41,8 @@ def print_data_info(train_df, train_cv_df, holdout_df, test_df, config) -> None:
     print(f'Holdout fraction: {config.split.test_size}')
     if config.model.active == 'knn':
         print(f'Selected KNN features: {list(config.preprocessing.knn_features)}')
+    elif config.model.active == 'dnn':
+        print(f'Excluded columns: {list(config.preprocessing.dnn_drop_columns)}')
     else:
         print(f'Excluded columns: {list(config.preprocessing.drop_columns)}')
 

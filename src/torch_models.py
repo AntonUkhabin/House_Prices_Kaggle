@@ -33,18 +33,18 @@ class TabularDNN(nn.Module):
         input_size = numerical_feature_count + sum(self.embedding_dims)
 
         self.mlp = nn.Sequential(
-            nn.Linear(input_size, 128),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-
-            nn.Linear(128, 64),
+            nn.Linear(input_size, 64),
             nn.ReLU(),
             nn.Dropout(0.1),
 
             nn.Linear(64, 32),
             nn.ReLU(),
+            nn.Dropout(0.1),
 
-            nn.Linear(32, 1),
+            nn.Linear(32, 16),
+            nn.ReLU(),
+
+            nn.Linear(16, 1),
         )
 
     def forward(self, numerical_features, categorical_features):

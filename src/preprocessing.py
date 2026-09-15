@@ -361,5 +361,5 @@ def build_dnn_preprocessor(config) -> Pipeline:
 
     return Pipeline([
         ('structural_missing', StructuralMissingTransformer()),
-        ('dnn_features', DNNPreprocessor(drop_columns=list(config.preprocessing.drop_columns))),
+        ('dnn_features', DNNPreprocessor(drop_columns=list(config.preprocessing.dnn_drop_columns))),
     ])

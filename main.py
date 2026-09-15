@@ -4,7 +4,7 @@ from time import perf_counter
 
 from config import config
 from src import experiment_logging as log
-from src import shap_analysis
+from src import permutation_importance, shap_analysis
 from src.data import load_data, split_train_holdout
 from src.train_functions import calculate_regression_metrics, cross_validate_model_with_early_stopping, cross_validate_standard, predict_with_pipeline_ensemble
 from src.utils import set_seed, setup_run_logging
@@ -66,6 +66,26 @@ def main() -> int:
 
         log.print_regression_metrics('OOF', oof_metrics)
         log.save_oof_predictions(train_cv_df, oof_predictions, fold_ids, config)
+
+        if config.model.active == 'dnn' and config.permutation_importance.enabled:
+            log.print_section('OOF Permutation Importance')
+            importance_started = perf_counter()
+
+            importance_result = permutation_importance.calculate_dnn_oof_permutation_importance(
+                train_cv_df=train_cv_df,
+                target_col='SalePrice',
+                fold_models=fold_models,
+                fold_ids=fold_ids,
+                oof_predictions=oof_predictions,
+                n_repeats=config.permutation_importance.n_repeats,
+                seed=config.general.seed,
+            )
+
+            importance_df = permutation_importance.save_dnn_permutation_importance(importance_result, config)
+
+            print(f'\nTop 20 DNN features by OOF permutation importance:')
+            print(importance_df.head(20).to_string(index=False, float_format=lambda value: f'{value:.6f}'))
+            print(f'Permutation importance runtime: {perf_counter() - importance_started:.1f} seconds')
 
         if config.shap.enabled:
             log.print_section('OOF SHAP Analysis')

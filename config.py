@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '49_dnn_embeddings_baseline',
+        'experiment_name': '57_dnn_weight_decay_001',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -16,6 +16,7 @@ config = {
         'path_to_training_history':     'outputs/training_history',
         'path_to_checkpoints':          'outputs/checkpoints',
         'path_to_shap':                 './outputs/shap',
+        'path_to_permutation_importance': './outputs/permutation_importance',
     },
     'training': {
         'fold_seed': 0xC0FFEE,
@@ -32,6 +33,10 @@ config = {
         'enabled': False,
         'max_display': 20,
     },
+    'permutation_importance': {
+        'enabled': False,
+        'n_repeats': 5,
+    },
     'dataloader_params': {
         'shuffle': True,
     },
@@ -46,6 +51,9 @@ config = {
         'drop_columns': ['Utilities', 'Condition2', 'BsmtUnfSF', 'BldgType', 'HouseStyle', 'Exterior2nd', 'GarageQual',
             'Street', 'Alley', 'RoofMatl', 'Heating', 'LowQualFinSF', 'PoolQC', 'BedroomAbvGr', 'TotRmsAbvGrd', 'GarageYrBlt', 'MasVnrArea', 'Fireplaces'],
 
+        # DNN использует все исходные признаки; сюда добавляются только исключённые DNN-specific features.
+        'dnn_drop_columns': [],
+
         'knn_features': ['OverallQual', 'GrLivArea', 'TotalBsmtSF', 'GarageCars', 'FullBath', 'YearBuilt', 'YearRemodAdd', 'KitchenQual', 'ExterQual', 'Neighborhood'],
         'knn_ordinal_features': ['KitchenQual', 'ExterQual'],
         'knn_nominal_features': ['Neighborhood'],
@@ -59,7 +67,7 @@ config = {
                 'epochs': 500,
                 'batch_size': 32,
                 'learning_rate': 0.001,
-                'weight_decay': 0.0001,
+                'weight_decay': 0.001,
                 'early_stopping_rounds': 30,
                 'min_delta': 0.0001,
                 'num_workers': 0,

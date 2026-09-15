@@ -30,6 +30,7 @@ def create_data_loader(features, labels, batch_size, shuffle, seed, num_workers)
         labels_tensor = torch.as_tensor(np.asarray(labels), dtype=torch.float32)
         dataset = TensorDataset(numerical_tensor, categorical_tensor, labels_tensor)
 
+    # Отдельный generator делает shuffle воспроизводимым и не зависит от глобального состояния PyTorch.
     generator = torch.Generator().manual_seed(seed)
 
     return DataLoader(
@@ -38,6 +39,7 @@ def create_data_loader(features, labels, batch_size, shuffle, seed, num_workers)
         shuffle=shuffle,
         generator=generator,
         num_workers=num_workers,
+        # Pinned memory ускоряет передачу batch с CPU на CUDA; на CPU этот режим автоматически отключается.
         pin_memory=torch.cuda.is_available(),
     )
 
@@ -88,10 +90,12 @@ def validate_one_epoch(model, data_loader, loss_function, device, target_std):
             predictions = model(numerical_features, categorical_features)
             loss = loss_function(predictions, targets)
 
+            # Учитываем размер batch, чтобы последний неполный batch не получил такой же вес, как полный.
             batch_size = targets.size(0)
             squared_error_sum += loss.item() * batch_size
             sample_count += batch_size
 
+    # Возвращаем RMSE из standardized target обратно в масштаб log(SalePrice).
     rmse_scaled = np.sqrt(squared_error_sum / sample_count)
     return float(rmse_scaled * target_std)
 
@@ -140,6 +144,7 @@ def train_fold(model, train_loader, val_loader, loss_function, optimizer, device
             best_epoch = epoch
             epochs_without_improvement = 0
 
+            # Сохраняем веса лучшей по validation RMSE эпохи, а не последней выполненной эпохи.
             torch.save({
                 'fold': fold,
                 'epoch': best_epoch,
@@ -163,6 +168,7 @@ def train_fold(model, train_loader, val_loader, loss_function, optimizer, device
     if best_epoch == 0:
         raise RuntimeError(f'No checkpoint was saved for fold {fold}.')
 
+    # После early stopping восстанавливаем веса лучшей эпохи для последующих predictions.
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
@@ -184,6 +190,7 @@ def predict_standardized(model, data_loader, device):
             categorical_features = categorical_features.to(device, non_blocking=True)
 
             batch_predictions = model(numerical_features, categorical_features)
+            # Переносим каждый batch predictions на CPU, чтобы результаты не накапливались в GPU memory.
             predictions.append(batch_predictions.cpu())
 
     if not predictions:
@@ -200,6 +207,7 @@ class DNNFoldModel:
             raise ValueError('target_std must be positive.')
 
         self.preprocessor = preprocessor
+        # Храним fold-модель на CPU и переносим на accelerator только на время prediction.
         self.model = model.to('cpu')
         self.target_mean = float(target_mean)
         self.target_std = float(target_std)
@@ -225,6 +233,7 @@ class DNNFoldModel:
             # Fold-модель возвращаем на CPU, чтобы ансамбль не хранил все модели в GPU memory.
             self.model.to('cpu')
 
+        # Преобразуем standardized prediction обратно в log(SalePrice), сохраняя общий интерфейс моделей.
         predictions_log = predictions_scaled * self.target_std + self.target_mean
 
         if not np.isfinite(predictions_log).all():
@@ -248,12 +257,16 @@ def cross_validate_neural_network(train_cv_df, target_col, config):
 
     scores = []
     fold_models = []
+    # Внутри архитектуры fold_ids хранятся как 0..n-1, а при сохранении в CSV преобразуются в 1..n.
     oof_predictions = np.full(len(features), np.nan, dtype=float)
     fold_ids = np.full(len(features), -1, dtype=np.int16)
 
-    for fold, (train_idx, val_idx) in enumerate(kfold.split(features), start=1):
+    # Разделяем внутренний zero-based индекс и отображаемый пользователю номер fold.
+    for fold_index, (train_idx, val_idx) in enumerate(kfold.split(features)):
+        fold = fold_index + 1
         print(f'\nFold {fold}')
 
+        # Сбрасываем random state перед каждым fold для полной воспроизводимости CV.
         set_seed(config.general.seed)
 
         features_train = features.iloc[train_idx]
@@ -266,6 +279,7 @@ def cross_validate_neural_network(train_cv_df, target_col, config):
         features_train_transformed = feature_pipeline.fit_transform(features_train, labels_train)
         features_val_transformed = feature_pipeline.transform(features_val)
 
+        # Стандартизуем target статистиками только train fold для стабильного обучения без data leakage.
         target_mean = float(labels_train.mean())
         target_std = float(labels_train.std())
 
@@ -280,6 +294,7 @@ def cross_validate_neural_network(train_cv_df, target_col, config):
         train_loader = create_data_loader(features_train_transformed, labels_train_scaled, model_params.batch_size, True, config.general.seed, model_params.num_workers)
         val_loader = create_data_loader(features_val_transformed, labels_val_scaled, model_params.batch_size, False, config.general.seed, model_params.num_workers)
 
+        # Размеры Embedding зависят от vocabulary текущего train fold и могут немного различаться между фолдами.
         model = build_torch_model(config.model.active, features_train_transformed['numerical'].shape[1], dnn_preprocessor.category_cardinalities_).to(device)
         loss_function = torch.nn.MSELoss()
         optimizer = torch.optim.AdamW(model.parameters(), lr=model_params.learning_rate, weight_decay=model_params.weight_decay)
@@ -325,14 +340,15 @@ def cross_validate_neural_network(train_cv_df, target_col, config):
         if not np.isclose(fold_score, best_validation_rmse, rtol=1e-5, atol=1e-6):
             raise RuntimeError(f'Restored DNN score differs from the best validation score on fold {fold}.')
 
+        # Записываем каждой строке prediction модели, которая не обучалась на этой строке.
         oof_predictions[val_idx] = validation_predictions
-        fold_ids[val_idx] = fold
+        fold_ids[val_idx] = fold_index
         scores.append(float(fold_score))
         fold_models.append(fold_model)
 
         print(f'Fold {fold} | RMSE(log): {fold_score:.5f} | Best epoch: {best_epoch} | Epochs run: {len(history["validation_rmse"])}')
 
-    if np.isnan(oof_predictions).any() or (fold_ids < 1).any():
+    if np.isnan(oof_predictions).any() or (fold_ids < 0).any():
         raise RuntimeError('OOF predictions or fold identifiers are incomplete.')
 
     return scores, fold_models, oof_predictions, fold_ids
