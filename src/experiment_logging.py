@@ -39,7 +39,12 @@ def print_data_info(train_df, train_cv_df, holdout_df, test_df, config) -> None:
     print(f'Holdout: {holdout_df.shape}')
     print(f'Kaggle test: {test_df.shape}')
     print(f'Holdout fraction: {config.split.test_size}')
-    if config.model.active == 'knn':
+
+    if config.model.active == 'blend':
+        print(f'Blend components: {list(config.blending.weights)}')
+        print(f'Classical excluded columns: {list(config.preprocessing.drop_columns)}')
+        print(f'DNN excluded columns: {list(config.preprocessing.dnn_drop_columns)}')
+    elif config.model.active == 'knn':
         print(f'Selected KNN features: {list(config.preprocessing.knn_features)}')
     elif config.model.active == 'dnn':
         print(f'Excluded columns: {list(config.preprocessing.dnn_drop_columns)}')
@@ -52,6 +57,25 @@ def print_model_info(config) -> None:
 
     print_section('Model Information')
     print(f'Active model: {config.model.active}')
+
+    if config.model.active == 'blend':
+        weights = dict(config.blending.weights)
+
+        print('Blend weights:')
+
+        for model_name, weight in weights.items():
+            print(f'{model_name}: {weight:.3f}')
+
+        print('\nComponent parameters:')
+
+        for model_name in weights:
+            print(f'\n[{model_name}]')
+
+            for name, value in config.model.models[model_name].items():
+                print(f'{name}: {value}')
+
+        return
+
     for name, value in config.model.models[config.model.active].items():
         print(f'{name}: {value}')
 
@@ -484,13 +508,19 @@ def save_boosting_learning_curves(history_path) -> Path:
     return plot_path
 
 
-def print_submission_info(number_of_models) -> None:
-    '''Print the ensemble prediction method and training scope.'''
+def print_submission_info(number_of_models, config) -> None:
+    '''Print the prediction method and training scope.'''
 
     print_section('Kaggle Submission')
-    print(f'Number of prediction models: {number_of_models}')
-    print('Prediction method: average log predictions, then apply np.exp')
-    print('Training data: Train/CV folds; holdout excluded')
+    print(f'Number of fitted fold models: {number_of_models}')
+
+    if config.model.active == 'blend':
+        weights = dict(config.blending.weights)
+        weights_text = ', '.join(f'{model_name}={weight:.3f}' for model_name, weight in weights.items())
+
+        print(f'Blend components: {list(weights)}')
+        print(f'Blend weights: {weights_text}')
+        print('Prediction method: mean fold predictions per component, weighted blend in log-space, then np.exp')
 
 
 def print_submission_summary(submission_df) -> None:

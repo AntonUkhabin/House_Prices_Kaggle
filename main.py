@@ -3,6 +3,7 @@ import traceback
 from time import perf_counter
 
 from config import config
+from src import blending
 from src import experiment_logging as log
 from src import permutation_importance, shap_analysis
 from src.data import load_data, split_train_holdout
@@ -39,20 +40,48 @@ def main() -> int:
         # Каждый фолд обучает свой пайплайн; модели сохраняются для ансамбля.
         log.print_cv_start(config)
 
-        if config.model.active == 'dnn':
+        if config.model.active == 'blend':
+            blend_result = blending.cross_validate_blend(train_cv_df, 'SalePrice', config)
+            scores = blend_result['scores']
+            oof_predictions = blend_result['oof_predictions']
+            fold_ids = blend_result['fold_ids']
+            number_of_models = sum(len(component['fold_models']) for component in blend_result['components'].values())
+        elif config.model.active == 'dnn':
             scores, fold_models, oof_predictions, fold_ids = cross_validate_neural_network(train_cv_df, 'SalePrice', config)
+            number_of_models = len(fold_models)
         elif config.model.active in ('catboost', 'xgboost'):
             scores, fold_models, oof_predictions, fold_ids = cross_validate_model_with_early_stopping(train_cv_df, 'SalePrice', config)
+            number_of_models = len(fold_models)
         else:
             scores, fold_models, oof_predictions, fold_ids = cross_validate_standard(train_cv_df, 'SalePrice', config)
+            number_of_models = len(fold_models)
 
-        log.print_cv_summary(scores, len(fold_models))
+        log.print_cv_summary(scores, number_of_models)
 
-        # Выводим диагностику, соответствующую активной модели.
-        log.print_model_diagnostics(fold_models, config, top_n=20)
+        if config.model.active == 'blend':
+            log.print_section('Blend Component Summary')
+
+            for model_name, component in blend_result['components'].items():
+                component_metrics = calculate_regression_metrics(train_cv_df['SalePrice'], component['oof_predictions'])
+                mean_cv_rmse = sum(component['scores']) / len(component['scores'])
+                print(f'{model_name} | weight: {component["weight"]:.3f} | mean CV RMSE(log): {mean_cv_rmse:.5f} | OOF RMSE(log): {component_metrics["rmse_log"]:.5f}')
+        else:
+            # Обычная диагностика рассчитана для одной active model.
+            log.print_model_diagnostics(fold_models, config, top_n=20)
 
         if config.logging.save_training_history:
-            if config.model.active in ('catboost', 'xgboost'):
+            if config.model.active == 'blend':
+                for model_name, component in blend_result['components'].items():
+                    component_config = component['config']
+                    component_fold_models = component['fold_models']
+
+                    if model_name in ('catboost', 'xgboost'):
+                        history_path = log.save_boosting_training_history(component_fold_models, component_config)
+                        log.save_boosting_learning_curves(history_path)
+                    elif model_name == 'dnn':
+                        history_path = log.save_dnn_training_history(component_fold_models, component_config)
+                        log.save_dnn_learning_curves(history_path)
+            elif config.model.active in ('catboost', 'xgboost'):
                 history_path = log.save_boosting_training_history(fold_models, config)
                 log.save_boosting_learning_curves(history_path)
             elif config.model.active == 'dnn':
@@ -111,16 +140,22 @@ def main() -> int:
             log.print_section('Holdout Evaluation')
 
             features_holdout = holdout_df.drop(columns=['SalePrice'])
-            holdout_predictions_log = predict_with_pipeline_ensemble(features_holdout, fold_models)
+            if config.model.active == 'blend':
+                holdout_predictions_log = blending.predict_with_blend(features_holdout, blend_result)
+            else:
+                holdout_predictions_log = predict_with_pipeline_ensemble(features_holdout, fold_models)
             holdout_metrics = calculate_regression_metrics(holdout_df['SalePrice'], holdout_predictions_log)
 
             log.print_regression_metrics('Holdout', holdout_metrics)
             log.save_holdout_predictions(holdout_df, holdout_predictions_log, config)
 
         # Тот же ансамбль предсказывает test.csv; save_submission возвращает цены в доллары.
-        log.print_submission_info(len(fold_models))
+        log.print_submission_info(number_of_models, config)
 
-        test_predictions_log = predict_with_pipeline_ensemble(test_df, fold_models)
+        if config.model.active == 'blend':
+            test_predictions_log = blending.predict_with_blend(test_df, blend_result)
+        else:
+            test_predictions_log = predict_with_pipeline_ensemble(test_df, fold_models)
         submission_df = log.save_submission(test_df, test_predictions_log, config)
 
         log.print_submission_summary(submission_df)

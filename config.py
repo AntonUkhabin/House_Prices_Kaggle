@@ -3,7 +3,7 @@ from omegaconf import OmegaConf
 config = {
     'general': {
         'seed': 0xC0FFEE,
-        'experiment_name': '57_dnn_weight_decay_001',
+        'experiment_name': '65_blend_lasso_catboost_dnn',
     },
     'paths': {
         'path_to_csv':                  './data/train.csv',
@@ -58,8 +58,15 @@ config = {
         'knn_ordinal_features': ['KitchenQual', 'ExterQual'],
         'knn_nominal_features': ['Neighborhood'],
     },
+    'blending': {
+        'weights': {
+            'lasso': 0.400,
+            'catboost': 0.275,
+            'dnn': 0.325,
+        },
+    },
     'model': {
-        'active': 'dnn',
+        'active': 'blend',
 
         'models': {
 
