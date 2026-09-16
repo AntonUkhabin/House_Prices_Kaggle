@@ -30,15 +30,14 @@ config = {
         'training_log_interval': 10,
     },
     'shap': {
+        # OOF SHAP поддерживается только для одиночного запуска CatBoost.
         'enabled': False,
         'max_display': 20,
     },
     'permutation_importance': {
+        # OOF Permutation Importance поддерживается для одиночных моделей, но не для blend.
         'enabled': False,
         'n_repeats': 5,
-    },
-    'dataloader_params': {
-        'shuffle': True,
     },
     'split': {
         'n_splits': 5,
@@ -53,10 +52,6 @@ config = {
 
         # DNN использует все исходные признаки; сюда добавляются только исключённые DNN-specific features.
         'dnn_drop_columns': [],
-
-        'knn_features': ['OverallQual', 'GrLivArea', 'TotalBsmtSF', 'GarageCars', 'FullBath', 'YearBuilt', 'YearRemodAdd', 'KitchenQual', 'ExterQual', 'Neighborhood'],
-        'knn_ordinal_features': ['KitchenQual', 'ExterQual'],
-        'knn_nominal_features': ['Neighborhood'],
     },
     'blending': {
         'weights': {
@@ -66,7 +61,7 @@ config = {
         },
     },
     'model': {
-        'active': 'blend',
+        'active': 'blend', # 'blend' for Ensemble
 
         'models': {
 
@@ -153,16 +148,6 @@ config = {
                 'random_state': '${general.seed}',
                 'n_jobs': 15,
                 'verbosity': 1,
-            },
-
-            'knn': {
-                'n_neighbors': 5,
-                'weights': 'uniform',
-                'algorithm': 'auto',
-                'leaf_size': 30,
-                'p': 2,
-                'metric': 'minkowski',
-                'n_jobs': 15,
             },
         },
     },

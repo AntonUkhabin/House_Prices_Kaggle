@@ -248,7 +248,7 @@ def cross_validate_neural_network(train_cv_df, target_col, config):
     features = train_cv_df.drop(columns=[target_col])
     labels_log = np.log(train_cv_df[target_col].to_numpy(dtype=np.float64))
 
-    kfold = KFold(n_splits=config.split.n_splits, shuffle=config.dataloader_params.shuffle, random_state=config.training.fold_seed)
+    kfold = KFold(n_splits=config.split.n_splits, shuffle=True, random_state=config.training.fold_seed)
 
     model_params = config.model.models.dnn
     device = get_torch_device()

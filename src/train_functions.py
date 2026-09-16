@@ -8,7 +8,6 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
 from catboost import CatBoostRegressor
 from xgboost import XGBRegressor
-from sklearn.neighbors import KNeighborsRegressor
 
 from src.preprocessing          import build_preprocessor
 from src.feature_engineering import SelectedLog1pTransformer
@@ -34,9 +33,6 @@ def build_model(config, categorical_features=None):
     
     if active_model == 'random_forest':
         return RandomForestRegressor(**model_params)
-
-    if active_model == 'knn':
-        return KNeighborsRegressor(**model_params)
 
     if active_model == 'catboost':
         if categorical_features is None:
@@ -129,10 +125,9 @@ def cross_validate_standard(train_cv_df, target_col, config):
     features = train_cv_df.drop(columns=[target_col])
     labels = np.log(train_cv_df[target_col])
 
-    shuffle = config.dataloader_params.shuffle
-    fold_seed = config.training.fold_seed if shuffle else None
+    fold_seed = config.training.fold_seed
 
-    kfold = KFold(n_splits=config.split.n_splits, shuffle=shuffle, random_state=fold_seed)
+    kfold = KFold(n_splits=config.split.n_splits, shuffle=True, random_state=fold_seed)
 
     scores = []
     fold_models = []
@@ -198,9 +193,8 @@ def cross_validate_model_with_early_stopping(train_cv_df, target_col, config):
     features = train_cv_df.drop(columns=[target_col])
     labels = np.log(train_cv_df[target_col])
 
-    shuffle = config.dataloader_params.shuffle
-    fold_seed = config.training.fold_seed if shuffle else None
-    kfold = KFold(n_splits=config.split.n_splits, shuffle=shuffle, random_state=fold_seed)
+    fold_seed = config.training.fold_seed
+    kfold = KFold(n_splits=config.split.n_splits, shuffle=True, random_state=fold_seed)
 
     scores = []
     fold_models = []

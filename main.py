@@ -17,6 +17,18 @@ import warnings
 warnings.filterwarnings('ignore', message='Found unknown categories.*encoded as all zeros', category=UserWarning, module='sklearn.preprocessing._encoders')
 
 
+def validate_analysis_config(config):
+    '''Validate model interpretation settings before training.'''
+
+    active_model = config.model.active
+
+    if config.shap.enabled and active_model != 'catboost':
+        raise ValueError(f'OOF SHAP supports only CatBoost, got: {active_model}.')
+
+    if config.permutation_importance.enabled and active_model == 'blend':
+        raise ValueError('OOF Permutation Importance is not implemented for blend. Run a blend component separately.')
+
+
 def main() -> int:
     '''Run the active regression model, save predictions and capture terminal output.'''
 
@@ -25,6 +37,9 @@ def main() -> int:
 
     try:
         log.print_experiment_info(config)
+
+        # Проверяем совместимость analysis methods до загрузки данных и обучения.
+        validate_analysis_config(config)
         
         set_seed(config.general.seed)
 
@@ -96,11 +111,11 @@ def main() -> int:
         log.print_regression_metrics('OOF', oof_metrics)
         log.save_oof_predictions(train_cv_df, oof_predictions, fold_ids, config)
 
-        if config.model.active == 'dnn' and config.permutation_importance.enabled:
+        if config.permutation_importance.enabled:
             log.print_section('OOF Permutation Importance')
             importance_started = perf_counter()
 
-            importance_result = permutation_importance.calculate_dnn_oof_permutation_importance(
+            importance_result = permutation_importance.calculate_oof_permutation_importance(
                 train_cv_df=train_cv_df,
                 target_col='SalePrice',
                 fold_models=fold_models,
@@ -110,9 +125,9 @@ def main() -> int:
                 seed=config.general.seed,
             )
 
-            importance_df = permutation_importance.save_dnn_permutation_importance(importance_result, config)
+            importance_df = permutation_importance.save_permutation_importance(importance_result, config)
 
-            print(f'\nTop 20 DNN features by OOF permutation importance:')
+            print('\nTop 20 features by OOF permutation importance:')
             print(importance_df.head(20).to_string(index=False, float_format=lambda value: f'{value:.6f}'))
             print(f'Permutation importance runtime: {perf_counter() - importance_started:.1f} seconds')
 

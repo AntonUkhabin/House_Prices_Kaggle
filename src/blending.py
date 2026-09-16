@@ -28,7 +28,7 @@ def validate_blend_weights(weights):
 
 
 def align_oof_frames(oof_frames):
-    '''Validate and align OOF prediction frames by Id.'''
+    '''Validate and align saved OOF prediction frames by Id.'''
 
     if not oof_frames:
         raise ValueError('OOF prediction frames must not be empty.')
@@ -79,7 +79,7 @@ def align_oof_frames(oof_frames):
 
 
 def blend_oof_predictions(oof_frames, weights):
-    '''Blend aligned OOF predictions in log space.'''
+    '''Blend predictions from saved OOF frames in log space.'''
 
     validate_blend_weights(weights)
 

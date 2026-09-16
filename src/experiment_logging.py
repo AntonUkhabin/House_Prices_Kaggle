@@ -1,15 +1,18 @@
+import json
+
 from datetime import datetime
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import json
 
 from omegaconf import OmegaConf
 
 from src.train_functions import get_boosting_training_info
 
+
+# --- Общая информация о запуске ---
 
 def print_section(title: str) -> None:
     '''Print a formatted section title.'''
@@ -26,7 +29,7 @@ def print_experiment_info(config) -> None:
     print(f'Started: {datetime.now():%Y-%m-%d %H:%M:%S}')
     print(f'Random seed: {config.general.seed}')
     print(f'Fold seed: {config.training.fold_seed}')
-    print(f'CV shuffle: {config.dataloader_params.shuffle}')
+    print('CV shuffle: True')
     print('Target transformation: np.log(SalePrice)')
     print('Primary metric: RMSE(log), lower is better')
 
@@ -44,8 +47,6 @@ def print_data_info(train_df, train_cv_df, holdout_df, test_df, config) -> None:
         print(f'Blend components: {list(config.blending.weights)}')
         print(f'Classical excluded columns: {list(config.preprocessing.drop_columns)}')
         print(f'DNN excluded columns: {list(config.preprocessing.dnn_drop_columns)}')
-    elif config.model.active == 'knn':
-        print(f'Selected KNN features: {list(config.preprocessing.knn_features)}')
     elif config.model.active == 'dnn':
         print(f'Excluded columns: {list(config.preprocessing.dnn_drop_columns)}')
     else:
@@ -95,6 +96,8 @@ def print_cv_summary(scores, number_of_models) -> None:
     print(f'Number of prediction models: {number_of_models}')
 
 
+# --- Model diagnostics ---
+
 def print_model_diagnostics(fold_models, config, top_n=20):
     '''Print diagnostics specific to the active model.'''
 
@@ -111,9 +114,6 @@ def print_model_diagnostics(fold_models, config, top_n=20):
 
     if active_model == 'xgboost':
         return print_xgboost_diagnostics(fold_models, config, top_n=top_n)
-
-    if active_model == 'knn':
-        return print_knn_diagnostics(fold_models, config)
 
     if active_model == 'dnn':
         return print_dnn_diagnostics(fold_models)
@@ -146,9 +146,7 @@ def print_linear_coefficients(fold_models, top_n=20) -> pd.DataFrame:
         if len(feature_names) != len(coefficients):
             raise ValueError('Feature names and model coefficients have different lengths.')
 
-        fold_coefficients.append(
-            pd.Series(coefficients, index=feature_names, name=f'fold_{fold}')
-        )
+        fold_coefficients.append(pd.Series(coefficients, index=feature_names, name=f'fold_{fold}'))
 
         intercepts.append(float(model.intercept_))
         # LinearRegression сохраняет ранг матрицы, а Ridge такого атрибута не предоставляет.
@@ -330,44 +328,6 @@ def print_xgboost_diagnostics(fold_models, config, top_n=20) -> pd.DataFrame:
     return importance_df
 
 
-def print_knn_diagnostics(fold_models, config) -> pd.DataFrame:
-    '''Print KNN feature space and fitted sample counts across folds.'''
-
-    if not fold_models:
-        raise ValueError('No fitted fold models provided.')
-
-    feature_names_by_fold = []
-    fitted_sample_counts = []
-    effective_metrics = []
-
-    for pipe in fold_models:
-        model = pipe.named_steps['model']
-        feature_names = pipe.named_steps['preprocessor'].get_feature_names_out().tolist()
-
-        feature_names_by_fold.append(feature_names)
-        fitted_sample_counts.append(int(model.n_samples_fit_))
-        effective_metrics.append(model.effective_metric_)
-
-    reference_features = feature_names_by_fold[0]
-
-    if any(feature_names != reference_features for feature_names in feature_names_by_fold[1:]):
-        raise ValueError('KNN feature names differ between folds.')
-
-    diagnostics_df = pd.DataFrame({'feature': reference_features})
-
-    print_section('KNN Diagnostics')
-    print(f'Features per fold: {len(reference_features)}')
-    print(f'Fitted rows per fold: {min(fitted_sample_counts)}–{max(fitted_sample_counts)}')
-    print(f'Neighbors: {config.model.models.knn.n_neighbors}')
-    print(f'Weights: {config.model.models.knn.weights}')
-    print(f'Configured metric: {config.model.models.knn.metric}, p={config.model.models.knn.p}')
-    print(f'Effective metrics: {effective_metrics}')
-    print('Features:')
-    print(diagnostics_df.to_string(index=False))
-
-    return diagnostics_df
-
-
 def print_dnn_diagnostics(fold_models) -> pd.DataFrame:
     '''Print DNN architecture and fold-specific training diagnostics.'''
 
@@ -394,6 +354,7 @@ def print_dnn_diagnostics(fold_models) -> pd.DataFrame:
 
     diagnostics_df = pd.DataFrame(diagnostics)
 
+    # Архитектура одинакова во всех folds, поэтому общие параметры берём из первой fitted model.
     reference_model = fold_models[0].model
     linear_layers = [layer for layer in reference_model.mlp if hasattr(layer, 'in_features')]
     mlp_dimensions = [linear_layers[0].in_features, *[layer.out_features for layer in linear_layers]]
@@ -412,6 +373,24 @@ def print_dnn_diagnostics(fold_models) -> pd.DataFrame:
     print(diagnostics_df.to_string(index=False, float_format=lambda value: f'{value:.5f}'))
 
     return diagnostics_df
+
+
+# --- Training histories ---
+
+def save_training_history_json(history, config) -> Path:
+    '''Save a training history dictionary to JSON.'''
+
+    output_dir = Path(config.paths.path_to_training_history)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f'{config.general.experiment_name}.json'
+
+    # allow_nan=False не позволяет сохранить невалидные JSON-значения NaN и Infinity.
+    with output_path.open('w', encoding='utf-8') as file:
+        json.dump(history, file, ensure_ascii=False, indent=2, allow_nan=False)
+
+    print(f'Training history saved: {output_path}')
+
+    return output_path
 
 
 def save_boosting_training_history(fold_models, config) -> Path:
@@ -446,21 +425,56 @@ def save_boosting_training_history(fold_models, config) -> Path:
             'validation_rmse': [float(value) for value in training_info['validation_rmse']],
         })
 
-    output_dir = Path(config.paths.path_to_training_history)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    output_path = output_dir / f'{config.general.experiment_name}.json'
-
-    with output_path.open('w', encoding='utf-8') as file:
-        json.dump(history, file, ensure_ascii=False, indent=2, allow_nan=False)
-
-    print(f'Training history saved: {output_path}')
-
-    return output_path
+    return save_training_history_json(history, config)
 
 
-def save_boosting_learning_curves(history_path) -> Path:
-    '''Save per-fold learning curves alongside a boosting JSON history.'''
+def save_dnn_training_history(fold_models, config) -> Path:
+    '''Save DNN parameters, architectures and per-fold training histories to JSON.'''
+
+    if not fold_models:
+        raise ValueError('No fitted DNN fold models provided.')
+
+    history = {
+        'experiment_name': config.general.experiment_name,
+        'model': 'dnn',
+        'target_transform': 'np.log with fold-specific standardization',
+        'metric': 'RMSE',
+        'fold_seed': config.training.fold_seed,
+        'parameters': OmegaConf.to_container(config.model.models.dnn, resolve=True),
+        'folds': [],
+    }
+
+    for fold_model in fold_models:
+        model = fold_model.model
+        dnn_preprocessor = fold_model.preprocessor.named_steps['preprocessor'].named_steps['dnn_features']
+
+        # Извлекаем фактическую fitted architecture, а не только параметры из config.
+        linear_layers = [layer for layer in model.mlp if hasattr(layer, 'in_features')]
+
+        history['folds'].append({
+            'fold': fold_model.fold,
+            'best_epoch': fold_model.best_epoch,
+            'epochs_run': len(fold_model.history['validation_rmse']),
+            'best_validation_rmse': fold_model.best_validation_rmse,
+            'target_mean': fold_model.target_mean,
+            'target_std': fold_model.target_std,
+            'numerical_features': len(dnn_preprocessor.numerical_features_),
+            'categorical_features': len(dnn_preprocessor.categorical_features_),
+            'embedding_dimensions': model.embedding_dims,
+            'mlp_dimensions': [linear_layers[0].in_features, *[layer.out_features for layer in linear_layers]],
+            'activations': [layer.__class__.__name__ for layer in model.mlp if layer.__class__.__name__ not in ('Linear', 'Dropout')],
+            'dropout_rates': [layer.p for layer in model.mlp if layer.__class__.__name__ == 'Dropout'],
+            'trainable_parameters': sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad),
+            'train_rmse': [float(value) for value in fold_model.history['train_rmse']],
+            'validation_rmse': [float(value) for value in fold_model.history['validation_rmse']],
+            'learning_rate': [float(value) for value in fold_model.history['learning_rate']],
+        })
+
+    return save_training_history_json(history, config)
+
+
+def _save_learning_curves(history_path, step_name, best_step_key) -> Path:
+    '''Save per-fold RMSE learning curves from a JSON training history.'''
 
     history_path = Path(history_path)
 
@@ -479,28 +493,29 @@ def save_boosting_learning_curves(history_path) -> Path:
         for axis, fold_history in zip(axes[:, 0], folds):
             train_rmse = np.asarray(fold_history['train_rmse'])
             validation_rmse = np.asarray(fold_history['validation_rmse'])
-            iterations = np.arange(1, len(validation_rmse) + 1)
+            steps = np.arange(1, len(validation_rmse) + 1)
+            best_step = fold_history[best_step_key]
 
-            # В JSON номер лучшей итерации сохранён с единицы, а индекс массива начинается с нуля.
-            best_iteration = fold_history['best_iteration']
-            best_rmse = validation_rmse[best_iteration - 1]
+            # Номер best step хранится с единицы, поэтому для массива используем индекс best_step - 1.
+            best_rmse = validation_rmse[best_step - 1]
 
-            axis.plot(iterations, train_rmse, label='Train RMSE')
-            axis.plot(iterations, validation_rmse, label='Validation RMSE')
-            axis.axvline(best_iteration, color='red', linestyle='--', alpha=0.7, label=f'Best iteration: {best_iteration}')
+            axis.plot(steps, train_rmse, label='Train RMSE')
+            axis.plot(steps, validation_rmse, label='Validation RMSE')
+            axis.axvline(best_step, color='red', linestyle='--', alpha=0.7, label=f'Best {step_name.lower()}: {best_step}')
 
             axis.set_title(f'Fold {fold_history["fold"]} — RMSE(log) | Best validation: {best_rmse:.5f}')
-            axis.set_xlabel('Iteration')
+            axis.set_xlabel(step_name)
             axis.set_ylabel('RMSE(log)')
             axis.grid(alpha=0.3)
             axis.legend()
 
-        model_name = {'catboost': 'CatBoost', 'xgboost': 'XGBoost'}.get(history['model'], history['model'])
-        experiment_name = history['experiment_name']
-        figure.suptitle(f'{model_name} training history — {experiment_name}', fontsize=14)
+        model_name = {'catboost': 'CatBoost', 'xgboost': 'XGBoost', 'dnn': 'DNN'}.get(history['model'], history['model'])
+
+        figure.suptitle(f'{model_name} training history — {history["experiment_name"]}', fontsize=14)
         figure.tight_layout(rect=(0, 0, 1, 0.97))
         figure.savefig(plot_path, dpi=150, bbox_inches='tight')
     finally:
+        # Закрываем figure даже при ошибке построения или сохранения графика.
         plt.close(figure)
 
     print(f'Learning curves saved: {plot_path}')
@@ -508,50 +523,66 @@ def save_boosting_learning_curves(history_path) -> Path:
     return plot_path
 
 
-def print_submission_info(number_of_models, config) -> None:
-    '''Print the prediction method and training scope.'''
+def save_boosting_learning_curves(history_path) -> Path:
+    '''Save per-fold boosting learning curves.'''
 
-    print_section('Kaggle Submission')
-    print(f'Number of fitted fold models: {number_of_models}')
-
-    if config.model.active == 'blend':
-        weights = dict(config.blending.weights)
-        weights_text = ', '.join(f'{model_name}={weight:.3f}' for model_name, weight in weights.items())
-
-        print(f'Blend components: {list(weights)}')
-        print(f'Blend weights: {weights_text}')
-        print('Prediction method: mean fold predictions per component, weighted blend in log-space, then np.exp')
+    return _save_learning_curves(history_path, step_name='Iteration', best_step_key='best_iteration')
 
 
-def print_submission_summary(submission_df) -> None:
-    '''Print the submission size and mean predicted price.'''
+def save_dnn_learning_curves(history_path) -> Path:
+    '''Save per-fold DNN learning curves.'''
 
-    print(f'Submission rows: {len(submission_df)}')
-    print(f'Mean predicted price: ${submission_df["SalePrice"].mean():,.2f}')
+    return _save_learning_curves(history_path, step_name='Epoch', best_step_key='best_epoch')
 
 
-def print_run_summary(config, elapsed_seconds) -> None:
-    '''Print the completed run duration and log path.'''
+# --- Evaluation artifacts ---
 
-    print_section('Run Completed')
-    print(f'Total runtime: {elapsed_seconds:.1f} seconds')
-    log_path = Path(config.paths.path_to_logs) / f'{config.general.experiment_name}.txt'
-    print(f'Log saved: {log_path}')
+def print_regression_metrics(name, metrics):
+    '''Print regression metrics with explicit units.'''
+
+    print(f'\n{name}:')
+    print(f'RMSE(log): {metrics["rmse_log"]:.5f}')
+    print(f'MAE($):    {metrics["mae_dollars"]:,.2f}')
+    print(f'MSE($²):   {metrics["mse_dollars_squared"]:,.2f}')
+    print(f'RMSE($):   {metrics["rmse_dollars"]:,.2f}')
+    print(f'R²:        {metrics["r2"]:.5f}')
+    print(f'MAPE:      {metrics["mape_pct"]:.2f}%')
+    print(f'SMAPE:     {metrics["smape_pct"]:.2f}%')
+    print(f'WAPE:      {metrics["wape_pct"]:.2f}%')
+
+
+def build_prediction_errors(dataframe, predictions_log) -> pd.DataFrame:
+    '''Add log-space and price-space prediction errors to a DataFrame.'''
+
+    predictions_log = np.asarray(predictions_log, dtype=float)
+
+    if predictions_log.shape != (len(dataframe),):
+        raise ValueError('Expected one prediction per data row.')
+
+    predictions_df = dataframe.copy()
+
+    # Все error columns используют единое направление: prediction minus actual.
+    predictions_df['actual_log'] = np.log(predictions_df['SalePrice'])
+    predictions_df['prediction_log'] = predictions_log
+    predictions_df['prediction_price'] = np.exp(predictions_log)
+    predictions_df['error_log'] = predictions_df['prediction_log'] - predictions_df['actual_log']
+    predictions_df['abs_error_log'] = predictions_df['error_log'].abs()
+    predictions_df['error_price'] = predictions_df['prediction_price'] - predictions_df['SalePrice']
+
+    return predictions_df
 
 
 def save_oof_predictions(train_cv_df, oof_predictions, fold_ids, config):
     '''Save out-of-fold predictions sorted by prediction error.'''
 
+    fold_ids = np.asarray(fold_ids)
+
+    if fold_ids.shape != (len(train_cv_df),):
+        raise ValueError('Expected one fold ID per development row.')
+
     oof_df = train_cv_df.copy()
-
     oof_df['fold'] = fold_ids + 1
-    oof_df['actual_log'] = np.log(oof_df['SalePrice'])
-    oof_df['prediction_log'] = oof_predictions
-    oof_df['prediction_price'] = np.exp(oof_predictions)
-
-    oof_df['error_log'] = oof_df['prediction_log'] - oof_df['actual_log']
-    oof_df['abs_error_log'] = oof_df['error_log'].abs()
-    oof_df['error_price'] = oof_df['prediction_price'] - oof_df['SalePrice']
+    oof_df = build_prediction_errors(oof_df, oof_predictions)
 
     output_dir = Path(config.paths.path_to_oof)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -568,37 +599,13 @@ def save_oof_predictions(train_cv_df, oof_predictions, fold_ids, config):
     return oof_df
 
 
-def print_regression_metrics(name, metrics):
-    '''Print regression metrics with explicit units.'''
-
-    print(f'\n{name}:')
-    print(f'RMSE(log): {metrics["rmse_log"]:.5f}')
-    print(f'MAE($):    {metrics["mae_dollars"]:,.2f}')
-    print(f'MSE($²):   {metrics["mse_dollars_squared"]:,.2f}')
-    print(f'RMSE($):   {metrics["rmse_dollars"]:,.2f}')
-    print(f'R²:        {metrics["r2"]:.5f}')
-    print(f'MAPE:      {metrics["mape_pct"]:.2f}%')
-    print(f'SMAPE:     {metrics["smape_pct"]:.2f}%')
-    print(f'WAPE:      {metrics["wape_pct"]:.2f}%')
-
-
 def save_holdout_predictions(holdout_df, predictions_log, config):
     '''Save holdout prices, predictions and prediction errors.'''
 
-    predictions_log = np.asarray(predictions_log)
-
-    predictions_df = holdout_df[['Id', 'SalePrice']].copy()
-    predictions_df['actual_log'] = np.log(predictions_df['SalePrice'])
-    predictions_df['prediction_log'] = predictions_log
-    predictions_df['prediction_price'] = np.exp(predictions_log)
-
-    predictions_df['error_log'] = predictions_df['prediction_log'] - predictions_df['actual_log']
-    predictions_df['abs_error_log'] = predictions_df['error_log'].abs()
-    predictions_df['error_price'] = predictions_df['prediction_price'] - predictions_df['SalePrice']
+    predictions_df = build_prediction_errors(holdout_df[['Id', 'SalePrice']], predictions_log)
 
     output_dir = Path(config.paths.path_to_holdout)
     output_dir.mkdir(parents=True, exist_ok=True)
-
     output_path = output_dir / f'{config.general.experiment_name}.csv'
 
     predictions_df = predictions_df.sort_values('abs_error_log', ascending=False, kind='stable').reset_index(drop=True)
@@ -607,6 +614,23 @@ def save_holdout_predictions(holdout_df, predictions_log, config):
     print(f'Holdout predictions saved: {output_path}')
 
     return predictions_df
+
+
+# --- Submission ---
+
+def print_submission_info(number_of_models, config) -> None:
+    '''Print the prediction method and training scope.'''
+
+    print_section('Kaggle Submission')
+    print(f'Number of fitted fold models: {number_of_models}')
+
+    if config.model.active == 'blend':
+        weights = dict(config.blending.weights)
+        weights_text = ', '.join(f'{model_name}={weight:.3f}' for model_name, weight in weights.items())
+
+        print(f'Blend components: {list(weights)}')
+        print(f'Blend weights: {weights_text}')
+        print('Prediction method: mean fold predictions per component, weighted blend in log-space, then np.exp')
 
 
 def save_submission(test_df, predictions_log, config):
@@ -634,96 +658,19 @@ def save_submission(test_df, predictions_log, config):
     return submission_df
 
 
-def save_dnn_training_history(fold_models, config) -> Path:
-    '''Save DNN parameters, architectures and per-fold training histories to JSON.'''
+def print_submission_summary(submission_df) -> None:
+    '''Print the submission size and mean predicted price.'''
 
-    if not fold_models:
-        raise ValueError('No fitted DNN fold models provided.')
-
-    history = {
-        'experiment_name': config.general.experiment_name,
-        'model': 'dnn',
-        'target_transform': 'np.log with fold-specific standardization',
-        'metric': 'RMSE',
-        'fold_seed': config.training.fold_seed,
-        'parameters': OmegaConf.to_container(config.model.models.dnn, resolve=True),
-        'folds': [],
-    }
-
-    for fold_model in fold_models:
-        model = fold_model.model
-        dnn_preprocessor = fold_model.preprocessor.named_steps['preprocessor'].named_steps['dnn_features']
-        linear_layers = [layer for layer in model.mlp if hasattr(layer, 'in_features')]
-
-        history['folds'].append({
-            'fold': fold_model.fold,
-            'best_epoch': fold_model.best_epoch,
-            'epochs_run': len(fold_model.history['validation_rmse']),
-            'best_validation_rmse': fold_model.best_validation_rmse,
-            'target_mean': fold_model.target_mean,
-            'target_std': fold_model.target_std,
-            'numerical_features': len(dnn_preprocessor.numerical_features_),
-            'categorical_features': len(dnn_preprocessor.categorical_features_),
-            'embedding_dimensions': model.embedding_dims,
-            'mlp_dimensions': [linear_layers[0].in_features, *[layer.out_features for layer in linear_layers]],
-            'activations': [layer.__class__.__name__ for layer in model.mlp if layer.__class__.__name__ not in ('Linear', 'Dropout')],
-            'dropout_rates': [layer.p for layer in model.mlp if layer.__class__.__name__ == 'Dropout'],
-            'trainable_parameters': sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad),
-            'train_rmse': [float(value) for value in fold_model.history['train_rmse']],
-            'validation_rmse': [float(value) for value in fold_model.history['validation_rmse']],
-            'learning_rate': [float(value) for value in fold_model.history['learning_rate']],
-        })
-
-    output_dir = Path(config.paths.path_to_training_history)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f'{config.general.experiment_name}.json'
-
-    with output_path.open('w', encoding='utf-8') as file:
-        json.dump(history, file, ensure_ascii=False, indent=2, allow_nan=False)
-
-    print(f'DNN training history saved: {output_path}')
-    return output_path
+    print(f'Submission rows: {len(submission_df)}')
+    print(f'Mean predicted price: ${submission_df["SalePrice"].mean():,.2f}')
 
 
-def save_dnn_learning_curves(history_path) -> Path:
-    '''Save per-fold DNN learning curves alongside their JSON history.'''
+# --- Завершение запуска ---
 
-    history_path = Path(history_path)
+def print_run_summary(config, elapsed_seconds) -> None:
+    '''Print the completed run duration and log path.'''
 
-    with history_path.open('r', encoding='utf-8') as file:
-        history = json.load(file)
-
-    folds = history['folds']
-
-    if not folds:
-        raise ValueError('DNN training history contains no folds.')
-
-    figure, axes = plt.subplots(len(folds), 1, figsize=(12, 3.5 * len(folds)), squeeze=False)
-    plot_path = history_path.with_suffix('.png')
-
-    try:
-        for axis, fold_history in zip(axes[:, 0], folds):
-            train_rmse = np.asarray(fold_history['train_rmse'])
-            validation_rmse = np.asarray(fold_history['validation_rmse'])
-            epochs = np.arange(1, len(validation_rmse) + 1)
-            best_epoch = fold_history['best_epoch']
-            best_rmse = fold_history['best_validation_rmse']
-
-            axis.plot(epochs, train_rmse, label='Train RMSE')
-            axis.plot(epochs, validation_rmse, label='Validation RMSE')
-            axis.axvline(best_epoch, color='red', linestyle='--', alpha=0.7, label=f'Best epoch: {best_epoch}')
-
-            axis.set_title(f'Fold {fold_history["fold"]} — RMSE(log) | Best validation: {best_rmse:.5f}')
-            axis.set_xlabel('Epoch')
-            axis.set_ylabel('RMSE(log)')
-            axis.grid(alpha=0.3)
-            axis.legend()
-
-        figure.suptitle(f'DNN training history — {history["experiment_name"]}', fontsize=16)
-        figure.tight_layout(rect=[0, 0, 1, 0.98])
-        figure.savefig(plot_path, dpi=150, bbox_inches='tight')
-    finally:
-        plt.close(figure)
-
-    print(f'DNN learning curves saved: {plot_path}')
-    return plot_path
+    print_section('Run Completed')
+    print(f'Total runtime: {elapsed_seconds:.1f} seconds')
+    log_path = Path(config.paths.path_to_logs) / f'{config.general.experiment_name}.txt'
+    print(f'Log saved: {log_path}')

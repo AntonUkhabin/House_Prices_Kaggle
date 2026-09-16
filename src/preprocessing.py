@@ -4,7 +4,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.utils.validation import check_is_fitted
 
 
@@ -227,9 +227,6 @@ def build_preprocessor(config):
     if active_model == 'xgboost':
         return build_xgboost_preprocessor(config)
 
-    if active_model == 'knn':
-        return build_knn_preprocessor(config)
-
     if active_model == 'dnn':
         return build_dnn_preprocessor(config)
 
@@ -314,46 +311,6 @@ def build_xgboost_preprocessor(config) -> Pipeline:
         ('structural_missing', StructuralMissingTransformer()),
         ('columns', column_transformer),
     ])
-
-
-def build_knn_preprocessor(config) -> ColumnTransformer:
-    '''Build model-specific preprocessing for selected KNN features.'''
-
-    selected_features = list(config.preprocessing.knn_features)
-    ordinal_features = list(config.preprocessing.knn_ordinal_features)
-    nominal_features = list(config.preprocessing.knn_nominal_features)
-    categorical_features = ordinal_features + nominal_features
-    numerical_features = [feature for feature in selected_features if feature not in categorical_features]
-
-    quality_order = ['Po', 'Fa', 'TA', 'Gd', 'Ex']
-
-    numerical_pipeline = Pipeline([
-        ('imputer', SimpleImputer(strategy='median', keep_empty_features=True)),
-        ('scaler', StandardScaler()),
-    ])
-
-    ordinal_pipeline = Pipeline([
-        ('imputer', SimpleImputer(strategy='most_frequent', keep_empty_features=True)),
-        # Сохраняем естественный порядок quality features перед расчётом расстояний.
-        ('encoder', OrdinalEncoder(
-            categories=[quality_order] * len(ordinal_features),
-            handle_unknown='use_encoded_value',
-            unknown_value=-1,
-        )),
-        ('scaler', StandardScaler()),
-    ])
-
-    nominal_pipeline = Pipeline([
-        ('imputer', SimpleImputer(strategy='most_frequent', keep_empty_features=True)),
-        # Незнакомый район при inference получает нули во всех обученных OHE-колонках.
-        ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False)),
-    ])
-
-    return ColumnTransformer([
-        ('numerical', numerical_pipeline, numerical_features),
-        ('ordinal', ordinal_pipeline, ordinal_features),
-        ('nominal', nominal_pipeline, nominal_features),
-    ], remainder='drop', verbose_feature_names_out=False)
 
 
 def build_dnn_preprocessor(config) -> Pipeline:
