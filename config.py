@@ -27,7 +27,7 @@ config = {
     },
     'logging': {
         'save_training_history': True,
-        'training_log_interval': 10,
+        'training_log_interval': 10,  # Print training metrics every N epochs. 10 - print every 10 epochs, 1 - print every epoch.
     },
     'shap': {
         # OOF SHAP поддерживается только для одиночного запуска CatBoost.
