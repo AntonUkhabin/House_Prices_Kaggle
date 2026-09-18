@@ -82,7 +82,7 @@ python main.py
 
 ![Интерактивный справочник признаков](./assets/feature_guide_preview.png)
 
-[Открыть полный HTML-справочник](./assets/house_prices_feature_guide.html)
+[Открыть полный HTML-справочник](https://antonukhabin.github.io/House_Prices_Kaggle/assets/house_prices_feature_guide.html)
 
 ## 5. Preprocessing и Feature Engineering
 
